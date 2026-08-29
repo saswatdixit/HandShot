@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>HANDSHOT — Phone Camera</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: #0a0d12;
+      color: #f2f5fa;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      padding: 16px;
+    }
+    header {
+      text-align: center;
+      margin-bottom: 14px;
+    }
+    h1 {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      color: #5ad7ff;
+    }
+    p.subtitle {
+      font-size: 13px;
+      color: #94a2b5;
+      margin-top: 2px;
+    }
+    .video-card {
+      width: 100%;
+      max-width: 480px;
+      background: #121720;
+      border: 1px solid #202b3c;
+      border-radius: 14px;
+      overflow: hidden;
+      position: relative;
+      aspect-ratio: 4 / 3;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    }
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .status-badge {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      background: rgba(10, 13, 18, 0.85);
+      border: 1px solid #2a374c;
+      border-radius: 20px;
+      padding: 4px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      backdrop-filter: blur(8px);
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #f5b041;
+    }
+    .dot.live { background: #5fe8a0; box-shadow: 0 0 8px #5fe8a0; }
+    .dot.error { background: #ff5860; }
+    .fps-badge {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      background: rgba(10, 13, 18, 0.85);
+      border: 1px solid #2a374c;
+      border-radius: 20px;
+      padding: 4px 10px;
+      font-size: 12px;
+      color: #5ad7ff;
+      font-family: monospace;
+      backdrop-filter: blur(8px);
+    }
+    .controls {
+      width: 100%;
+      max-width: 480px;
+      margin-top: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .btn-row {
+      display: flex;
+      gap: 10px;
+    }
+    button {
+      flex: 1;
+      padding: 13px 16px;
+      font-size: 14px;
+      font-weight: 600;
+      border-radius: 10px;
+      border: 1px solid #344660;
+      background: #182230;
+      color: #f2f5fa;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: all 0.15s ease;
+    }
+    button:active {
+      transform: scale(0.98);
+    }
+    button.primary {
+      background: #5ad7ff;
+      color: #0a0d12;
+      border-color: #5ad7ff;
+    }
+    button.active {
+      background: #24354a;
+      border-color: #5ad7ff;
+      color: #5ad7ff;
+    }
+    .info-card {
+      width: 100%;
+      max-width: 480px;
+      background: #121720;
+      border: 1px solid #202b3c;
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin-top: 14px;
+      font-size: 12px;
+      color: #94a2b5;
+      line-height: 1.5;
+    }
+    .info-card strong {
+      color: #f2f5fa;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>HANDSHOT</h1>
+    <p class="subtitle">Mobile Webcam Streamer</p>
+  </header>
+
+  <div class="video-card">
+    <video id="webcam" playsinline autoplay muted></video>
+    <div class="status-badge">
+      <div id="status-dot" class="dot"></div>
+      <span id="status-text">Standby</span>
+    </div>
+    <div id="fps-counter" class="fps-badge">0 FPS</div>
+  </div>
+
+  <div class="controls">
+    <div class="btn-row">
+      <button id="btn-toggle-cam">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 7h-4l-2-3H10L8 7H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V9c0-1.1-.9-2-2-2z"/><circle cx="12" cy="13" r="4"/></svg>
+        <span id="cam-facing-text">Rear Camera</span>
+      </button>
+      <button id="btn-stream" class="primary">
+        <span id="stream-btn-text">Start Stream</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="info-card">
+    <strong>Tips for Best Tracking:</strong>
+    <br>• Hold the camera steady facing your hand.
+    <br>• Keep your hand in good lighting.
+    <br>• Stream latency: <span id="latency-val" style="color: #5fe8a0;">~15 ms</span>.
+  </div>
+
+  <canvas id="capture-canvas" style="display:none;"></canvas>
+
+  <script>
+    let currentStream = null;
+    let facingMode = "environment"; // "environment" (rear) or "user" (front)
+    let isStreaming = false;
+    let inFlight = false;
+    let frameCount = 0;
+    let lastFpsUpdate = performance.now();
+
+    const video = document.getElementById("webcam");
+    const canvas = document.getElementById("capture-canvas");
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    const statusDot = document.getElementById("status-dot");
+    const statusText = document.getElementById("status-text");
+    const fpsCounter = document.getElementById("fps-counter");
+    const btnStream = document.getElementById("btn-stream");
+    const streamBtnText = document.getElementById("stream-btn-text");
+    const btnToggleCam = document.getElementById("btn-toggle-cam");
+    const camFacingText = document.getElementById("cam-facing-text");
+    const latencyVal = document.getElementById("latency-val");
+
+    async function initCamera() {
+      if (currentStream) {
+        currentStream.getTracks().forEach(track => track.stop());
+      }
+      try {
+        const constraints = {
+          video: {
+            facingMode: { ideal: facingMode },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            frameRate: { ideal: 30 }
+          },
+          audio: false
+        };
+        currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = currentStream;
+        await video.play();
+        statusDot.className = "dot";
+        statusText.textContent = "Ready (" + (facingMode === "environment" ? "Rear" : "Front") + ")";
+      } catch (err) {
+        console.error("Camera access failed:", err);
+        statusDot.className = "dot error";
+        statusText.textContent = "Camera Error";
+      }
+    }
+
+    btnToggleCam.addEventListener("click", async () => {
+      facingMode = (facingMode === "environment") ? "user" : "environment";
+      camFacingText.textContent = (facingMode === "environment") ? "Rear Camera" : "Front Camera";
+      await initCamera();
+    });
+
+    btnStream.addEventListener("click", () => {
+      if (!isStreaming) {
+        isStreaming = true;
+        btnStream.className = "active";
+        streamBtnText.textContent = "Pause Stream";
+        statusDot.className = "dot live";
+        statusText.textContent = "Streaming Live";
+        startFrameLoop();
+      } else {
+        isStreaming = false;
+        btnStream.className = "primary";
+        streamBtnText.textContent = "Resume Stream";
+        statusDot.className = "dot";
+        statusText.textContent = "Paused";
+      }
+    });
+
+    async function sendFrame() {
+      if (!isStreaming || inFlight || !video.videoWidth) return;
+      inFlight = true;
+
+      const targetW = 640;
+      const targetH = Math.round((video.videoHeight / video.videoWidth) * targetW);
+      canvas.width = targetW;
+      canvas.height = targetH;
+      ctx.drawImage(video, 0, 0, targetW, targetH);
+
+      const sendStart = performance.now();
+      canvas.toBlob(async (blob) => {
+        if (!blob || !isStreaming) {
+          inFlight = false;
+          return;
+        }
+        try {
+          const resp = await fetch("/api/stream/frame", {
+            method: "POST",
+            headers: {
+              "Content-Type": "image/jpeg",
+              "X-Camera-Facing": facingMode,
+              "X-Client-Timestamp": sendStart.toString()
+            },
+            body: blob
+          });
+          const roundTrip = Math.round(performance.now() - sendStart);
+          latencyVal.textContent = `~${roundTrip} ms`;
+          frameCount++;
+        } catch (e) {
+          // Ignore dropped post
+        } finally {
+          inFlight = false;
+        }
+      }, "image/jpeg", 0.65);
+    }
+
+    function startFrameLoop() {
+      function loop() {
+        if (isStreaming) {
+          sendFrame();
+          const now = performance.now();
+          if (now - lastFpsUpdate >= 1000) {
+            fpsCounter.textContent = `${frameCount} FPS`;
+            frameCount = 0;
+            lastFpsUpdate = now;
+          }
+          requestAnimationFrame(loop);
+        }
+      }
+      requestAnimationFrame(loop);
+    }
+
+    window.addEventListener("DOMContentLoaded", initCamera);
+  </script>
+</body>
+</html>

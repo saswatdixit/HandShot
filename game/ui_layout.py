@@ -1,4 +1,4 @@
-"""Centralized UI Layout manager, safe zones, and collision-free coordinate calculations for HANDSHOT (Phase 11)."""
+"""Centralized UI Layout manager, safe zones, and collision-free coordinate calculations for HANDSHOT (Phase 12)."""
 
 from __future__ import annotations
 
@@ -54,13 +54,13 @@ class UILayout:
         )
 
         # Debug Panel (Positioned in Top-Right corner below Top HUD)
-        dbg_w = 265
-        dbg_h = 205
+        dbg_w = 275
+        dbg_h = 225
         dbg_x = w - dbg_w - margin_x
         dbg_y = self.hud_height + 12
         self.debug_panel_rect = pygame.Rect(dbg_x, dbg_y, dbg_w, dbg_h)
 
-        # Modal Cards (Ready, Pause, Results)
+        # Modal Cards (Ready, Pause, Results, Camera Setup)
         self.ready_card_rect = pygame.Rect(
             w // 2 - min(480, w - 40) // 2,
             h // 2 - 145,
@@ -80,6 +80,13 @@ class UILayout:
             h // 2 - 205,
             min(480, w - 40),
             410,
+        )
+
+        self.camera_card_rect = pygame.Rect(
+            w // 2 - min(540, w - 40) // 2,
+            h // 2 - 200,
+            min(540, w - 40),
+            400,
         )
 
     def check_hud_zones_separated(self) -> bool:

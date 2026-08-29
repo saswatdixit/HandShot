@@ -1,25 +1,27 @@
-"""Custom vector UI icons and primitives for HANDSHOT (Phase 11). Zero emoji dependencies."""
+"""Custom vector UI icons, refined target renderers, and primitives for HANDSHOT (Phase 12). Zero emoji dependencies."""
 
 from __future__ import annotations
 
 import math
 import pygame
 
+from game.theme import THEME
+
 
 def draw_card(
     surface: pygame.Surface,
     rect: tuple[int, int, int, int] | pygame.Rect,
-    bg_color: tuple[int, int, int] | tuple[int, int, int, int],
-    border_color: tuple[int, int, int] | tuple[int, int, int, int] | None = None,
+    bg_color: tuple[int, int, int] | tuple[int, int, int, int] = THEME.BG_SURFACE,
+    border_color: tuple[int, int, int] | tuple[int, int, int, int] | None = THEME.BORDER_SUBTLE,
     border_width: int = 1,
     border_radius: int = 12,
 ) -> pygame.Rect:
-    """Draw a clean rounded card panel with optional alpha and border."""
+    """Draw an elegant rounded card panel with optional alpha and border."""
     x, y, w, h = rect
     r = pygame.Rect(x, y, w, h)
     card_surf = pygame.Surface((w, h), pygame.SRCALPHA)
 
-    bg_alpha = bg_color[3] if len(bg_color) == 4 else 255
+    bg_alpha = bg_color[3] if len(bg_color) == 4 else 245
     pygame.draw.rect(card_surf, (*bg_color[:3], bg_alpha), (0, 0, w, h), border_radius=border_radius)
 
     if border_color is not None and border_width > 0:
@@ -41,9 +43,9 @@ def draw_keycap(
     cx: float,
     cy: float,
     active: bool = False,
-    active_color: tuple[int, int, int] = (255, 220, 80),
+    active_color: tuple[int, int, int] = THEME.ACCENT_GOLD,
 ) -> pygame.Rect:
-    """Render a polished keycap + label unit (e.g. [P] PAUSE)."""
+    """Render an elegant keycap + label unit (e.g. [P] PAUSE)."""
     kw, kh = font.size(key_text)
     lw, lh = small_font.size(label_text) if label_text else (0, 0)
 
@@ -55,10 +57,9 @@ def draw_keycap(
     start_x = round(cx - total_w / 2)
     start_y = round(cy - box_h / 2)
 
-    # Key box
-    box_bg = (30, 46, 70) if active else (18, 28, 44)
-    box_border = active_color if active else (50, 75, 110)
-    key_col = active_color if active else (220, 235, 255)
+    box_bg = (30, 42, 60) if active else (18, 24, 34)
+    box_border = active_color if active else THEME.BORDER_SUBTLE
+    key_col = active_color if active else THEME.TEXT_PRIMARY
 
     pygame.draw.rect(surface, box_bg, (start_x, start_y, box_w, box_h), border_radius=5)
     pygame.draw.rect(surface, box_border, (start_x, start_y, box_w, box_h), 1, border_radius=5)
@@ -66,9 +67,8 @@ def draw_keycap(
     k_surf = font.render(key_text, True, key_col)
     surface.blit(k_surf, k_surf.get_rect(center=(start_x + box_w // 2, start_y + box_h // 2)))
 
-    # Label text
     if label_text:
-        lbl_col = active_color if active else (160, 185, 210)
+        lbl_col = active_color if active else THEME.TEXT_SECONDARY
         l_surf = small_font.render(label_text, True, lbl_col)
         surface.blit(l_surf, (start_x + box_w + 6, start_y + (box_h - lh) // 2))
 
@@ -82,15 +82,15 @@ def draw_control_bar(
     muted: bool = False,
     debug_on: bool = False,
 ) -> None:
-    """Draw the refined bottom control strip."""
-    draw_card(surface, rect, (12, 18, 28, 220), (28, 42, 64), border_width=1, border_radius=8)
+    """Draw the refined minimalist bottom control strip."""
+    draw_card(surface, rect, (12, 16, 24, 210), THEME.BORDER_SUBTLE, border_width=1, border_radius=8)
 
     items = [
-        ("P", "PAUSE", False, (220, 235, 255)),
-        ("R", "RESTART", False, (220, 235, 255)),
-        ("M", "MUTED" if muted else "MUTE", muted, (255, 120, 120)),
-        ("C", "MIRROR", False, (220, 235, 255)),
-        ("D", "DEBUG ON" if debug_on else "DEBUG", debug_on, (255, 220, 80)),
+        ("P", "PAUSE", False, THEME.TEXT_PRIMARY),
+        ("R", "RESTART", False, THEME.TEXT_PRIMARY),
+        ("M", "MUTED" if muted else "MUTE", muted, THEME.ACCENT_CORAL),
+        ("C", "MIRROR", False, THEME.TEXT_PRIMARY),
+        ("D", "DEBUG ON" if debug_on else "DEBUG", debug_on, THEME.ACCENT_GOLD),
     ]
 
     spacing = rect.width / (len(items) + 1)
@@ -100,8 +100,8 @@ def draw_control_bar(
             surface,
             key,
             lbl,
-            typo.small_bold,
-            typo.small,
+            typo.label,
+            typo.caption,
             item_cx,
             rect.centery,
             active=is_act,
@@ -117,8 +117,8 @@ def draw_vector_heart(
     active: bool = True,
 ) -> None:
     """Draw a vector heart icon."""
-    fill_col = (255, 65, 90) if active else (38, 24, 32)
-    border_col = (255, 140, 160) if active else (70, 42, 55)
+    fill_col = THEME.ACCENT_CORAL if active else (36, 22, 28)
+    border_col = (255, 140, 155) if active else (65, 38, 48)
     s = size / 18.0
 
     pts = [
@@ -140,7 +140,7 @@ def draw_vector_stopwatch(
     cx: float,
     cy: float,
     radius: float = 10.0,
-    color: tuple[int, int, int] = (255, 215, 80),
+    color: tuple[int, int, int] = THEME.ACCENT_GOLD,
 ) -> None:
     """Draw a vector stopwatch icon."""
     x, y, r = round(cx), round(cy), round(radius)
@@ -156,7 +156,7 @@ def draw_vector_target(
     cx: float,
     cy: float,
     radius: float = 10.0,
-    color: tuple[int, int, int] = (110, 235, 150),
+    color: tuple[int, int, int] = THEME.ACCENT_EMERALD,
 ) -> None:
     """Draw a vector bullseye target icon."""
     x, y, r = round(cx), round(cy), round(radius)
@@ -170,7 +170,7 @@ def draw_vector_leaf(
     cx: float,
     cy: float,
     radius: float = 10.0,
-    color: tuple[int, int, int] = (105, 245, 160),
+    color: tuple[int, int, int] = THEME.ACCENT_EMERALD,
 ) -> None:
     """Draw a vector chill leaf icon."""
     x, y, r = round(cx), round(cy), round(radius)
@@ -191,7 +191,7 @@ def draw_vector_star(
     cx: float,
     cy: float,
     radius: float = 12.0,
-    color: tuple[int, int, int] = (255, 220, 80),
+    color: tuple[int, int, int] = THEME.ACCENT_GOLD,
 ) -> None:
     """Draw a 5-point vector star icon."""
     pts = []
@@ -208,11 +208,11 @@ def draw_vector_speaker(
     cy: float,
     radius: float = 9.0,
     muted: bool = False,
-    color: tuple[int, int, int] = (130, 220, 255),
+    color: tuple[int, int, int] = THEME.ACCENT_CYAN,
 ) -> None:
     """Draw a vector speaker icon with mute cross."""
     x, y, r = round(cx), round(cy), round(radius)
-    col = (255, 110, 110) if muted else color
+    col = THEME.ACCENT_CORAL if muted else color
 
     pts = [
         (x - round(r * 0.7), y - round(r * 0.4)),
@@ -231,3 +231,37 @@ def draw_vector_speaker(
         arc_surf = pygame.Surface((r * 2, r * 2), pygame.SRCALPHA)
         pygame.draw.arc(arc_surf, (*col, 220), (0, 0, r * 2, r * 2), -math.pi / 3, math.pi / 3, 2)
         surface.blit(arc_surf, (x - round(r * 0.2), y - r))
+
+
+def draw_vector_phone(
+    surface: pygame.Surface,
+    cx: float,
+    cy: float,
+    w: float = 14.0,
+    h: float = 24.0,
+    color: tuple[int, int, int] = THEME.ACCENT_CYAN,
+) -> None:
+    """Draw a clean vector smartphone icon."""
+    x = round(cx - w / 2)
+    y = round(cy - h / 2)
+    pygame.draw.rect(surface, color, (x, y, round(w), round(h)), 2, border_radius=4)
+    # Screen inner area
+    pygame.draw.rect(surface, (color[0], color[1], color[2]), (x + 2, y + 4, round(w) - 4, round(h) - 8), 1)
+    # Home bar / notch dot
+    pygame.draw.line(surface, color, (cx - 2, y + h - 2), (cx + 2, y + h - 2), 1)
+
+
+def draw_vector_webcam(
+    surface: pygame.Surface,
+    cx: float,
+    cy: float,
+    radius: float = 10.0,
+    color: tuple[int, int, int] = THEME.ACCENT_CYAN,
+) -> None:
+    """Draw a clean vector webcam icon."""
+    x, y, r = round(cx), round(cy), round(radius)
+    pygame.draw.circle(surface, color, (x, y - 2), r, 2)
+    pygame.draw.circle(surface, color, (x, y - 2), max(2, round(r * 0.4)), 2)
+    # Stand
+    pygame.draw.line(surface, color, (x, y + r - 2), (x, y + r + 3), 2)
+    pygame.draw.line(surface, color, (x - round(r * 0.7), y + r + 3), (x + round(r * 0.7), y + r + 3), 2)

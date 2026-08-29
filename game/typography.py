@@ -1,4 +1,4 @@
-"""Centralized, responsive typography system for HANDSHOT (Phase 10.5)."""
+"""Centralized, responsive typography system for HANDSHOT (Phase 12)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import pygame
 
 
 class Typography:
-    """Scalable typography system with system font fallbacks and bounding-box measurements."""
+    """Scalable typography hierarchy with modern system font detection and fallbacks."""
 
     def __init__(self, screen_size: tuple[int, int] = (1280, 720)) -> None:
         if not pygame.font.get_init():
@@ -30,11 +30,24 @@ class Typography:
         if key not in self._cache:
             font = None
             if font_family == "display":
-                candidates = ["Segoe UI Semibold", "Segoe UI", "Arial", "Trebuchet MS"]
+                candidates = [
+                    "Outfit",
+                    "Inter",
+                    "Segoe UI Semibold",
+                    "Segoe UI",
+                    "Arial",
+                    "Trebuchet MS",
+                ]
             elif font_family == "mono":
                 candidates = ["Consolas", "Courier New", "Lucida Console"]
-            else:  # "ui"
-                candidates = ["Segoe UI", "Arial", "Tahoma", "Helvetica"]
+            else:  # "ui" / body
+                candidates = [
+                    "Inter",
+                    "Segoe UI",
+                    "Arial",
+                    "Tahoma",
+                    "Helvetica",
+                ]
 
             for name in candidates:
                 try:
@@ -52,21 +65,32 @@ class Typography:
     def _update_fonts(self) -> None:
         sf = self._scale_factor()
 
-        self.display_xl = self._get_font("display", max(48, round(84 * sf)), bold=True)
-        self.display_l = self._get_font("display", max(26, round(36 * sf)), bold=True)
-        self.title = self._get_font("display", max(20, round(28 * sf)), bold=True)
-        self.subtitle = self._get_font("ui", max(13, round(18 * sf)), bold=False)
-        self.heading = self._get_font("display", max(18, round(24 * sf)), bold=True)
-        self.hud_label = self._get_font("ui", max(11, round(12 * sf)), bold=True)
-        self.hud_value = self._get_font("display", max(18, round(25 * sf)), bold=True)
-        self.score = self._get_font("display", max(20, round(28 * sf)), bold=True)
+        # Explicit Typography Levels (Phase 12)
+        self.display = self._get_font("display", max(52, round(84 * sf)), bold=True)
+        self.h1 = self._get_font("display", max(26, round(36 * sf)), bold=True)
+        self.h2 = self._get_font("display", max(18, round(24 * sf)), bold=True)
         self.body = self._get_font("ui", max(13, round(16 * sf)), bold=False)
         self.body_bold = self._get_font("ui", max(13, round(16 * sf)), bold=True)
-        self.small = self._get_font("ui", max(11, round(13 * sf)), bold=False)
+        self.body_small = self._get_font("ui", max(11, round(13 * sf)), bold=False)
+        self.label = self._get_font("ui", max(11, round(12 * sf)), bold=True)
+        self.caption = self._get_font("ui", max(10, round(11 * sf)), bold=False)
+        self.score = self._get_font("display", max(20, round(28 * sf)), bold=True)
+        self.score_large = self._get_font("display", max(32, round(44 * sf)), bold=True)
+        self.monospace_debug = self._get_font("mono", max(11, round(13 * sf)), bold=False)
+
+        # Backwards Compatibility Aliases
+        self.display_xl = self.display
+        self.display_l = self.h1
+        self.title = self.h1
+        self.heading = self.h2
+        self.subtitle = self._get_font("ui", max(13, round(18 * sf)), bold=False)
+        self.hud_label = self.label
+        self.hud_value = self._get_font("display", max(18, round(25 * sf)), bold=True)
+        self.small = self.body_small
         self.small_bold = self._get_font("ui", max(11, round(13 * sf)), bold=True)
         self.button = self._get_font("ui", max(13, round(17 * sf)), bold=True)
         self.countdown = self._get_font("display", max(56, round(96 * sf)), bold=True)
-        self.debug = self._get_font("mono", max(11, round(14 * sf)), bold=False)
+        self.debug = self.monospace_debug
 
     @staticmethod
     def draw_text(

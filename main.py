@@ -71,8 +71,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                              "thread (slower; for comparison/debugging)")
     parser.add_argument("--no-tracking", action="store_true",
                         help="camera only, skip MediaPipe (tests Phase 1 alone)")
+    parser.add_argument("--phone-camera", action="store_true",
+                        help="use wireless mobile phone camera stream via QR code pairing")
     parser.add_argument("--preview", action="store_true",
-                        help="open the Phase 1+2 OpenCV development preview instead of the game screen")
+                        help="open the interactive UI development preview with live screen cycling")
     parser.add_argument("--check", nargs="?", type=int, const=90, default=None,
                         metavar="FRAMES",
                         help="run headless diagnostics over FRAMES frames (default 90)")
@@ -80,7 +82,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         metavar="PATH", help="save one annotated frame and exit")
     parser.add_argument("--debug-gestures", action="store_true",
                         help="open game with live gesture diagnostics HUD enabled")
-    parser.add_argument("--ui-preview", choices=["select", "ready", "countdown", "playing", "paused", "results"],
+    parser.add_argument("--ui-preview", choices=["select", "camera", "ready", "countdown", "playing", "paused", "results"],
                         default=None, help="directly preview a specific UI screen state")
     parser.add_argument("--duration", type=float, default=0.0, metavar="SECONDS",
                         help="auto-close the preview after N seconds (0 = manual)")
@@ -102,7 +104,10 @@ def open_camera(args: argparse.Namespace) -> CameraManager:
         backend=args.backend,
         threaded=not args.no_threaded_capture,
     )
-    camera.open()
+    if getattr(args, "phone_camera", False):
+        camera.use_phone_camera()
+    else:
+        camera.open()
     return camera
 
 
@@ -342,96 +347,36 @@ def cmd_snapshot(args: argparse.Namespace) -> int:
 
 
 def run_preview(args: argparse.Namespace) -> int:
-    """Live preview window - the Phase 1+2 milestone view."""
+    """Interactive UI & Camera Setup Development Preview with live screen cycling."""
+    try:
+        from game.aim_screen import AimScreen
+        from game.bubble_game import GameState
+    except ModuleNotFoundError as exc:
+        if exc.name != "pygame":
+            raise
+        print("Pygame is required. Install with: py -m pip install -r requirements.txt", file=sys.stderr)
+        return 1
+
     camera = open_camera(args)
     tracker = create_tracker(args)
-    print(camera.describe())
-    if tracker is not None:
-        print(f"hand tracking: {tracker.model_path.name}, max {settings.MAX_HANDS} hand(s)")
-    print("keys: q/Esc quit | m mirror | l landmarks | h help | r reset | s snapshot")
-
-    window = settings.PREVIEW_WINDOW_NAME
-    cv2.namedWindow(window, cv2.WINDOW_NORMAL)
-    cv2.resizeWindow(window, camera.width, camera.height)
-
-    show_landmarks = settings.SHOW_LANDMARKS
-    show_help = settings.SHOW_HUD
-    loop_fps = 0.0
-    last_loop = time.perf_counter()
-    started = time.perf_counter()
-    exit_code = 0
+    print("HANDSHOT UI & Camera Preview:")
+    print("Keys: [1] Select  [2] Camera Setup  [3] Ready  [4] Countdown  [5] Playing  [6] Paused  [7] Results")
+    print("      [Left/Right] Cycle screens  [W] Toggle Camera  [D] Toggle Debug HUD  [ESC] Exit")
 
     try:
-        while True:
-            read_started = time.perf_counter()
-            frame = camera.read()
-            capture_ms = (time.perf_counter() - read_started) * 1000.0
-            if frame is None:
-                if cv2.waitKey(1) & 0xFF in (ord("q"), 27):
-                    break
-                continue
-
-            result = (
-                tracker.process(frame, mirrored=camera.mirror)
-                if tracker is not None
-                else None
-            )
-
-            now = time.perf_counter()
-            instant_fps = 1.0 / max(1e-6, now - last_loop)
-            last_loop = now
-            loop_fps = (instant_fps if loop_fps == 0.0
-                        else settings.FPS_SMOOTHING * loop_fps
-                        + (1 - settings.FPS_SMOOTHING) * instant_fps)
-
-            render_overlay(frame, camera, tracker, result, loop_fps, capture_ms,
-                           show_landmarks, show_help)
-            cv2.imshow(window, frame)
-
-            key = cv2.waitKey(1) & 0xFF
-            if key in (ord("q"), 27):
-                break
-            if key == ord("m"):
-                camera.toggle_mirror()
-                if tracker is not None:
-                    tracker.reset()
-            elif key == ord("l"):
-                show_landmarks = not show_landmarks
-            elif key == ord("h"):
-                show_help = not show_help
-            elif key == ord("r") and tracker is not None:
-                tracker.reset()
-            elif key == ord("s"):
-                SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
-                path = SNAPSHOT_DIR / f"snapshot_{int(time.time())}.png"
-                cv2.imwrite(str(path), frame)
-                print(f"saved {path}")
-
-            # Window closed with the title-bar X.
-            if cv2.getWindowProperty(window, cv2.WND_PROP_VISIBLE) < 1:
-                break
-            if args.duration and (time.perf_counter() - started) >= args.duration:
-                print(f"auto-closing after {args.duration:.1f}s")
-                break
-    except CameraError as exc:
-        print(f"\nCamera error: {exc}", file=sys.stderr)
-        exit_code = 1
+        screen_app = AimScreen(camera, tracker, debug_hud=args.debug_gestures)
+        screen_app._game.state = GameState.CAMERA_SELECT
+        return screen_app.run(args.duration)
     finally:
         if tracker is not None:
             tracker.close()
-        camera.release()
-        cv2.destroyAllWindows()
-        # Give the GUI backend a chance to actually tear the window down.
-        for _ in range(4):
-            cv2.waitKey(1)
-
-    print(f"closed cleanly - {camera.frames_read} frames read, "
-          f"{camera.frames_failed} dropped")
-    return exit_code
+        if camera is not None:
+            camera.release()
+            print(f"closed cleanly - {camera.frames_read} frames read, {camera.frames_failed} dropped")
 
 
 def run_game(args: argparse.Namespace) -> int:
-    """Phase 5 Pygame blue-bubble game."""
+    """Phase 12 Pygame blue-bubble game."""
     try:
         from game.aim_screen import AimScreen
         from game.bubble_game import GameState
@@ -452,6 +397,7 @@ def run_game(args: argparse.Namespace) -> int:
         if args.ui_preview:
             preview_state_map = {
                 "select": GameState.MODE_SELECT,
+                "camera": GameState.CAMERA_SELECT,
                 "ready": GameState.READY,
                 "countdown": GameState.COUNTDOWN,
                 "playing": GameState.PLAYING,
