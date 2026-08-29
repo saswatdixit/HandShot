@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import sys; print\\(sys.executable\\)\")",
+      "Bash(python -m pip list)",
+      "Bash(python -m pip install opencv-python mediapipe numpy)",
+      "Bash(python -c ' *)",
+      "Bash(mkdir -p assets/models)",
+      "Bash(curl -fsSL -o assets/models/hand_landmarker.task \"https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task\")",
+      "Bash(python -c \"import main; print\\('imports OK'\\)\")",
+      "Bash(python main.py --help)",
+      "Bash(python main.py --list-cameras)",
+      "Bash(python main.py --check 60 --no-tracking)",
+      "Bash(python main.py --check 90)",
+      "Bash(python /tmp/handshot_test/test_detect.py)",
+      "Read(//d/tmp/**)",
+      "Bash(pwd -W)",
+      "Bash(echo \"bash /tmp resolves to: $\\(cd /tmp && pwd -W || pwd\\)\")",
+      "Bash(sed -i 's|Path\\(\"/tmp/handshot_test\"\\)|Path\\(r\"C:\\\\\\\\Users\\\\\\\\saswa\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Temp\\\\\\\\handshot_test\"\\)|' /d/tmp/test_detect.py)",
+      "Bash(mv /d/tmp/test_detect.py /tmp/handshot_test/test_detect.py)",
+      "Bash(rmdir /d/tmp)",
+      "Bash(python \"D:/tmp/handshot_test/test_detect.py\")",
+      "Bash(python main.py --check 90 --no-threaded-capture)",
+      "Bash(powershell -NoProfile -ExecutionPolicy Bypass -File \"C:/Users/saswa/AppData/Local/Temp/handshot_test/load.ps1\")",
+      "Bash(python \"C:/Users/saswa/AppData/Local/Temp/handshot_test/load_aware_bench.py\")",
+      "Bash(timeout 120 python main.py --duration 6)",
+      "Bash(echo \"EXIT=$?\")",
+      "Bash(timeout 200 python \"C:/Users/saswa/AppData/Local/Temp/handshot_test/test_preview_loop.py\")",
+      "Bash(timeout 200 python \"C:/Users/saswa/AppData/Local/Temp/handshot_test/test_buffer_aliasing.py\")",
+      "Bash(timeout 300 python \"C:/Users/saswa/AppData/Local/Temp/handshot_test/rerender_overlays.py\")",
+      "Bash(timeout 200 python main.py --snapshot \"C:/Users/saswa/AppData/Local/Temp/handshot_test/live_nohand.png\")",
+      "Bash(timeout 200 python main.py --duration 5)"
+    ]
+  }
+}
