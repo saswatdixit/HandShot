@@ -36,10 +36,6 @@ The project is designed around one central idea:
 <!-- Replace these placeholders with actual screenshots/GIFs from the project -->
 
 <p align="center">
-  <img src="docs/images/gameplay.png" width="800" alt="HANDSHOT Gameplay">
-</p>
-
-<p align="center">
   <i>Aim using your index finger and pinch to shoot.</i>
 </p>
 
