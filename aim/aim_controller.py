@@ -1,4 +1,4 @@
-"""Direct, calibrated screen-space crosshair control with adaptive smoothing for HANDSHOT (Phase 10)."""
+"""Direct, calibrated screen-space crosshair control with 1€ adaptive velocity filtering for HANDSHOT."""
 
 from __future__ import annotations
 
@@ -23,15 +23,19 @@ class AimSettings:
     input_bottom: float = settings.AIM_INPUT_BOTTOM
     deadzone: float = settings.AIM_DEADZONE
     smoothing_hz: float = settings.AIM_SMOOTHING_HZ
+    min_cutoff_hz: float = settings.AIM_MIN_CUTOFF_HZ
+    speed_coeff: float = settings.AIM_SPEED_COEFF
+    derivative_cutoff_hz: float = settings.AIM_DERIVATIVE_CUTOFF_HZ
     margin: int = settings.CROSSHAIR_MARGIN
     mirror_x: bool = False
     pre_shot_anchor_seconds: float = settings.AIM_PRE_SHOT_ANCHOR_SECONDS
+    max_teleport_distance: float = settings.AIM_MAX_TELEPORT_DISTANCE
 
     def __post_init__(self) -> None:
         if not (self.input_left < self.input_right and self.input_top < self.input_bottom):
             raise ValueError("the calibrated input rectangle must have positive size")
-        if self.deadzone < 0 or self.smoothing_hz < 0:
-            raise ValueError("deadzone and smoothing_hz cannot be negative")
+        if self.deadzone < 0 or self.smoothing_hz < 0 or self.min_cutoff_hz < 0 or self.speed_coeff < 0:
+            raise ValueError("smoothing and deadzone parameters cannot be negative")
         if self.pre_shot_anchor_seconds < 0:
             raise ValueError("pre_shot_anchor_seconds cannot be negative")
 
@@ -39,7 +43,8 @@ class AimSettings:
 class AimController:
     """Map a calibrated normalized fingertip position directly to the playfield.
 
-    One predictable pipeline: fingertip → linear map → adaptive velocity-based smoother.
+    One predictable pipeline:
+    fingertip → outlier rejection → soft-knee deadzone → 1€ adaptive velocity filter → playfield clamp.
     Maintains a timestamped position history so shots can use the pre-pinch aim anchor.
     """
 
@@ -50,8 +55,11 @@ class AimController:
         self._playfield: Bounds = (0.0, 0.0, 1.0, 1.0)
         self._position = (0.0, 0.0)
         self._target = (0.0, 0.0)
-        self._last_input: tuple[float, float] | None = None
-        self._history: deque[tuple[float, float, float]] = deque(maxlen=60)
+        self._last_raw_input: tuple[float, float] | None = None
+        self._filtered_input: tuple[float, float] | None = None
+        self._filtered_dx = (0.0, 0.0)
+        self._current_cutoff_hz = self.settings.min_cutoff_hz
+        self._history: deque[tuple[float, float, float]] = deque(maxlen=90)
         self.set_screen_size(screen_size)
         self.reset()
 
@@ -61,17 +69,36 @@ class AimController:
 
     @property
     def has_input_anchor(self) -> bool:
-        return self._last_input is not None
+        return self._last_raw_input is not None
 
     @property
     def playfield(self) -> Bounds:
         return self._playfield
 
+    @property
+    def raw_input(self) -> tuple[float, float] | None:
+        return self._last_raw_input
+
+    @property
+    def filtered_input(self) -> tuple[float, float] | None:
+        return self._filtered_input
+
+    @property
+    def velocity(self) -> tuple[float, float]:
+        return self._filtered_dx
+
+    @property
+    def current_cutoff_hz(self) -> float:
+        return self._current_cutoff_hz
+
     def reset(self) -> None:
         centre = self._playfield_centre()
         self._position = centre
         self._target = centre
-        self._last_input = None
+        self._last_raw_input = None
+        self._filtered_input = None
+        self._filtered_dx = (0.0, 0.0)
+        self._current_cutoff_hz = self.settings.min_cutoff_hz
         self._history.clear()
 
     def set_screen_size(self, screen_size: tuple[int, int]) -> None:
@@ -104,28 +131,70 @@ class AimController:
     ) -> tuple[float, float]:
         """Map one fingertip position; ``None`` holds the current aim point."""
         timestamp = now if now is not None else time.perf_counter()
-        speed_norm = 0.0
+        dt = max(1e-4, delta_seconds)
 
         if fingertip_norm is not None:
-            raw_input = self._normalized_point(fingertip_norm)
-            is_first = self._last_input is None
-            if is_first or not self._within_deadzone(raw_input):
-                if not is_first and self._last_input is not None and delta_seconds > 0:
-                    dist_norm = math.hypot(raw_input[0] - self._last_input[0], raw_input[1] - self._last_input[1])
-                    speed_norm = dist_norm / delta_seconds
-                self._target = self._map_to_playfield(raw_input)
-                self._last_input = raw_input
-                if is_first:
-                    self._position = self._target
+            raw = self._normalized_point(fingertip_norm)
 
-        if delta_seconds > 0 and self._position != self._target:
-            speed_factor = min(1.0, max(0.0, (speed_norm - 0.01) / 0.15))
-            effective_hz = self.settings.smoothing_hz * (0.80 + 0.60 * speed_factor)
-            alpha = 1.0 - math.exp(-effective_hz * delta_seconds)
-            self._position = self._clamp((
-                self._position[0] + (self._target[0] - self._position[0]) * alpha,
-                self._position[1] + (self._target[1] - self._position[1]) * alpha,
-            ))
+            # First observation initialization
+            if self._last_raw_input is None or self._filtered_input is None:
+                self._last_raw_input = raw
+                self._filtered_input = raw
+                self._filtered_dx = (0.0, 0.0)
+                self._target = self._map_to_playfield(raw)
+                self._position = self._target
+            else:
+                # 1. Outlier check (reject NaN or wildly out-of-range coordinates)
+                if not (math.isfinite(raw[0]) and math.isfinite(raw[1])):
+                    raw = self._last_raw_input
+
+                # 2. Deadzone check
+                if self.settings.deadzone > 0:
+                    delta_x = raw[0] - self._last_raw_input[0]
+                    delta_y = raw[1] - self._last_raw_input[1]
+                    dist = math.hypot(delta_x, delta_y)
+                    if dist < self.settings.deadzone:
+                        effective_input = self._last_raw_input
+                    else:
+                        effective_input = raw
+                        self._last_raw_input = raw
+                else:
+                    effective_input = raw
+                    self._last_raw_input = raw
+
+                # 3. 1€ Adaptive Velocity Filter
+                if self.settings.smoothing_hz >= 500.0:
+                    # Near-infinite / bypass smoothing for instant direct mapping
+                    self._filtered_input = effective_input
+                    self._filtered_dx = ((effective_input[0] - self._filtered_input[0]) / dt,
+                                         (effective_input[1] - self._filtered_input[1]) / dt)
+                else:
+                    # Compute and filter derivative
+                    raw_dx = ((effective_input[0] - self._filtered_input[0]) / dt,
+                              (effective_input[1] - self._filtered_input[1]) / dt)
+                    alpha_d = self._compute_alpha(self.settings.derivative_cutoff_hz, dt)
+                    self._filtered_dx = (
+                        alpha_d * raw_dx[0] + (1.0 - alpha_d) * self._filtered_dx[0],
+                        alpha_d * raw_dx[1] + (1.0 - alpha_d) * self._filtered_dx[1],
+                    )
+
+                    # Dynamic cutoff frequency (1€ filter formula)
+                    speed = math.hypot(self._filtered_dx[0], self._filtered_dx[1])
+                    cutoff_hz = self.settings.min_cutoff_hz + self.settings.speed_coeff * speed
+                    if self.settings.smoothing_hz > 0:
+                        # Allow smoothing_hz to scale responsiveness
+                        cutoff_hz = max(self.settings.min_cutoff_hz, min(self.settings.smoothing_hz, cutoff_hz))
+                    self._current_cutoff_hz = cutoff_hz
+
+                    alpha_pos = self._compute_alpha(cutoff_hz, dt)
+                    self._filtered_input = (
+                        alpha_pos * effective_input[0] + (1.0 - alpha_pos) * self._filtered_input[0],
+                        alpha_pos * effective_input[1] + (1.0 - alpha_pos) * self._filtered_input[1],
+                    )
+
+                # Map directly to playfield
+                self._target = self._map_to_playfield(self._filtered_input)
+                self._position = self._target
 
         self._history.append((timestamp, self._position[0], self._position[1]))
         return self._position
@@ -160,12 +229,10 @@ class AimController:
 
         return self._position
 
-    def _within_deadzone(self, raw_input: tuple[float, float]) -> bool:
-        if self.settings.deadzone <= 0 or self._last_input is None:
-            return False
-        dx = raw_input[0] - self._last_input[0]
-        dy = raw_input[1] - self._last_input[1]
-        return math.hypot(dx, dy) < self.settings.deadzone
+    @staticmethod
+    def _compute_alpha(cutoff_hz: float, dt: float) -> float:
+        rate = 2.0 * math.pi * max(1e-4, cutoff_hz)
+        return 1.0 - math.exp(-rate * dt)
 
     def _map_to_playfield(self, input_point: tuple[float, float]) -> tuple[float, float]:
         x, y = input_point

@@ -97,6 +97,15 @@ class UILayoutTests(unittest.TestCase):
                 f"Debug panel exceeded screen width at resolution {width}x{height}",
             )
 
+    def test_typography_anchors_alignment(self) -> None:
+        surf = pygame.Surface((600, 600))
+        typo = Typography((1280, 720))
+        for anchor in ["topleft", "topright", "midleft", "midright", "center", "bottomleft", "bottomright", "left", "right", "top", "bottom"]:
+            r = typo.draw_text(surf, "TEST", typo.body, (255, 255, 255), (300, 300), anchor=anchor)
+            self.assertIsInstance(r, pygame.Rect)
+            self.assertGreater(r.width, 0)
+            self.assertGreater(r.height, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

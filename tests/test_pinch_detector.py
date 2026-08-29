@@ -139,15 +139,40 @@ class PinchDetectorTests(unittest.TestCase):
         # Far from camera (palm len 70px, tip dist 14px -> ratio 0.20)
         self.assertTrue(pinch.update(hand_px(14.0, palm_len=70.0), 0.00).shot)
 
-    def test_cooldown_rejects_sub_cooldown_bounce(self) -> None:
-        pinch = PinchDetector(PinchSettings(cooldown_seconds=0.10))
-        self.assertTrue(pinch.update(hand_norm(0.20), 0.00).shot)
-        pinch.update(hand_norm(0.80), 0.02)
-        # Squeeze before 0.10s cooldown -> does not fire
-        self.assertFalse(pinch.update(hand_norm(0.20), 0.05).shot)
-        # Release and squeeze after cooldown -> fires
-        pinch.update(hand_norm(0.80), 0.08)
-        self.assertTrue(pinch.update(hand_norm(0.20), 0.12).shot)
+    def test_hysteresis_boundary_stability(self) -> None:
+        pinch = PinchDetector()
+        # Trigger pinch with close distance (<0.45)
+        self.assertTrue(pinch.update(hand_norm(0.30), 0.00).shot)
+        self.assertEqual(pinch.phase, PinchPhase.PINCHED)
+
+        # Move to hover zone (0.52): above close (0.45) but below release (0.62)
+        res_hover = pinch.update(hand_norm(0.52), 0.05)
+        self.assertFalse(res_hover.shot)
+        # Must remain in PINCHED phase due to hysteresis
+        self.assertEqual(res_hover.phase, PinchPhase.PINCHED)
+        self.assertTrue(res_hover.is_pinched)
+
+        # Further hover jitter (0.48 -> 0.55 -> 0.50) never oscillates or re-arms
+        self.assertEqual(pinch.update(hand_norm(0.48), 0.08).phase, PinchPhase.PINCHED)
+        self.assertEqual(pinch.update(hand_norm(0.55), 0.11).phase, PinchPhase.PINCHED)
+        self.assertEqual(pinch.update(hand_norm(0.50), 0.14).phase, PinchPhase.PINCHED)
+
+        # Cross release threshold (0.75 / 1.15 = 0.652 >= 0.62) -> re-arms to READY
+        res_rel = pinch.update(hand_norm(0.75), 0.17)
+        self.assertEqual(res_rel.phase, PinchPhase.READY)
+        self.assertFalse(res_rel.is_pinched)
+
+    def test_debounce_frames_rejects_single_frame_spike(self) -> None:
+        pinch = PinchDetector(PinchSettings(debounce_frames=2))
+        # Frame 1: spike to 0.30 -> not confirmed yet
+        res1 = pinch.update(hand_norm(0.30), 0.00)
+        self.assertFalse(res1.shot)
+        self.assertEqual(res1.phase, PinchPhase.READY)
+
+        # Frame 2: confirmed at 0.30 -> fires shot
+        res2 = pinch.update(hand_norm(0.30), 0.03)
+        self.assertTrue(res2.shot)
+        self.assertEqual(res2.phase, PinchPhase.PINCHED)
 
 
 if __name__ == "__main__":

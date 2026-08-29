@@ -1,4 +1,4 @@
-"""Natural, robust, and responsive thumb-and-index pinch detection for HANDSHOT (Phase 10)."""
+"""Natural, robust, and responsive thumb-and-index pinch detection for HANDSHOT."""
 
 from __future__ import annotations
 
@@ -26,6 +26,8 @@ class PinchSettings:
     close_threshold: float = settings.PINCH_CLOSE_THRESHOLD
     release_threshold: float = settings.PINCH_RELEASE_THRESHOLD
     cooldown_seconds: float = settings.PINCH_COOLDOWN_SECONDS
+    debounce_frames: int = settings.PINCH_DEBOUNCE_FRAMES
+    release_stable_frames: int = settings.PINCH_RELEASE_STABLE_FRAMES
 
     def __post_init__(self) -> None:
         if self.close_threshold <= 0 or self.release_threshold <= self.close_threshold:
@@ -48,20 +50,26 @@ class PinchResult:
 class PinchDetector:
     """Generate exactly one shot per pinch: READY → PINCHED (fires shot) → release → READY.
 
-    Designed for effortless, natural finger contact without forced squeezing,
-    featuring scale/rotation-invariant normalization, lightweight noise filtering,
-    and instantaneous single-frame re-arming.
+    Features:
+    - Distance- and rotation-invariant composite hand scaling (palm length, knuckle width, bone span)
+    - Hysteresis: separate close and release thresholds to prevent state oscillation
+    - Debouncing: fast temporal confirmation rejecting isolated 1-frame spikes
+    - Clean tracking loss handling: resets state without generating phantom shots
     """
 
     def __init__(self, settings_: PinchSettings | None = None) -> None:
         self.settings = settings_ or PinchSettings()
         self._smoothed_dist: float | None = None
+        self._close_confirm_count = 0
+        self._release_confirm_count = 0
         self.reset()
 
     def reset(self) -> None:
         self._phase = PinchPhase.READY
         self._last_shot_time = -math.inf
         self._smoothed_dist = None
+        self._close_confirm_count = 0
+        self._release_confirm_count = 0
 
     @property
     def phase(self) -> PinchPhase:
@@ -73,31 +81,46 @@ class PinchDetector:
             # Cleanly reset on tracking loss without stuck state or phantom shots
             self._phase = PinchPhase.READY
             self._smoothed_dist = None
+            self._close_confirm_count = 0
+            self._release_confirm_count = 0
             return PinchResult(self._phase, False, False, None, None)
 
         raw_distance = self._normalized_distance(hand)
 
-        # Immediate threshold response with hysteresis and jitter suppression in hover zone
+        # Light filter in the ambiguous hover zone, immediate passthrough at thresholds
         if self._smoothed_dist is None:
             self._smoothed_dist = raw_distance
         else:
             if raw_distance <= self.settings.close_threshold or raw_distance >= self.settings.release_threshold:
                 self._smoothed_dist = raw_distance
             else:
-                self._smoothed_dist = 0.70 * raw_distance + 0.30 * self._smoothed_dist
+                self._smoothed_dist = 0.75 * raw_distance + 0.25 * self._smoothed_dist
 
         distance = self._smoothed_dist
         shot = False
 
         if self._phase is PinchPhase.READY:
             if distance <= self.settings.close_threshold:
-                if now - self._last_shot_time >= self.settings.cooldown_seconds:
-                    self._last_shot_time = now
-                    shot = True
-                    self._phase = PinchPhase.PINCHED
+                self._close_confirm_count += 1
+                if self._close_confirm_count >= self.settings.debounce_frames:
+                    if now - self._last_shot_time >= self.settings.cooldown_seconds:
+                        self._last_shot_time = now
+                        shot = True
+                        self._phase = PinchPhase.PINCHED
+                        self._close_confirm_count = 0
+                        self._release_confirm_count = 0
+            else:
+                self._close_confirm_count = 0
+
         elif self._phase in (PinchPhase.PINCHED, PinchPhase.AWAITING_RELEASE):
             if distance >= self.settings.release_threshold:
-                self._phase = PinchPhase.READY
+                self._release_confirm_count += 1
+                if self._release_confirm_count >= self.settings.release_stable_frames:
+                    self._phase = PinchPhase.READY
+                    self._release_confirm_count = 0
+                    self._close_confirm_count = 0
+            else:
+                self._release_confirm_count = 0
 
         is_pinched = (self._phase is PinchPhase.PINCHED)
         return PinchResult(self._phase, is_pinched, shot, distance, raw_distance)
@@ -113,6 +136,7 @@ class PinchDetector:
             middle_mcp = (float(pts[settings.MIDDLE_MCP][0]), float(pts[settings.MIDDLE_MCP][1]))
             index_mcp = (float(pts[settings.INDEX_MCP][0]), float(pts[settings.INDEX_MCP][1]))
             pinky_mcp = (float(pts[settings.PINKY_MCP][0]), float(pts[settings.PINKY_MCP][1]))
+            index_pip = (float(pts[settings.INDEX_PIP][0]), float(pts[settings.INDEX_PIP][1]))
         else:
             landmarks = hand.landmarks_norm
             thumb = (float(landmarks[settings.THUMB_TIP][0]), float(landmarks[settings.THUMB_TIP][1]))
@@ -121,9 +145,20 @@ class PinchDetector:
             middle_mcp = (float(landmarks[settings.MIDDLE_MCP][0]), float(landmarks[settings.MIDDLE_MCP][1]))
             index_mcp = (float(landmarks[settings.INDEX_MCP][0]), float(landmarks[settings.INDEX_MCP][1]))
             pinky_mcp = (float(landmarks[settings.PINKY_MCP][0]), float(landmarks[settings.PINKY_MCP][1]))
+            index_pip = (float(landmarks[settings.INDEX_PIP][0]), float(landmarks[settings.INDEX_PIP][1]))
 
         tip_distance = math.dist(thumb, index)
         palm_length = math.dist(wrist, middle_mcp)
         palm_width = math.dist(index_mcp, pinky_mcp)
-        hand_scale = max(palm_length, palm_width * 1.25, 1e-6)
+
+        # Proximal bone length if available
+        index_proximal = math.dist(index_mcp, index_pip) if index_pip != (0.0, 0.0) else 0.0
+
+        # Composite scale metric invariant to hand tilt and distance
+        hand_scale = max(
+            palm_length,
+            palm_width * 1.15,
+            index_proximal * 2.8,
+            1e-6,
+        )
         return tip_distance / hand_scale

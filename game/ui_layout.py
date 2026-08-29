@@ -54,8 +54,8 @@ class UILayout:
         )
 
         # Debug Panel (Positioned in Top-Right corner below Top HUD)
-        dbg_w = 275
-        dbg_h = 225
+        dbg_w = 285
+        dbg_h = 265
         dbg_x = w - dbg_w - margin_x
         dbg_y = self.hud_height + 12
         self.debug_panel_rect = pygame.Rect(dbg_x, dbg_y, dbg_w, dbg_h)

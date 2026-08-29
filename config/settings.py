@@ -90,10 +90,15 @@ AIM_INPUT_TOP = 0.18
 AIM_INPUT_RIGHT = 0.82
 AIM_INPUT_BOTTOM = 0.82
 
-# Adaptive smoothing: dynamic cut-off frequency ranges from 12 Hz (stationary)
-# to 36 Hz (fast movement) to eliminate jitter while delivering instant response.
-AIM_DEADZONE = 0.002
+# 1€ Adaptive Velocity Filter:
+# Stationary cutoff (2.5 Hz) removes micro-jitter; dynamic scaling (beta=18.0)
+# provides zero-lag instant tracking during fast motion.
+AIM_MIN_CUTOFF_HZ = 2.5
+AIM_SPEED_COEFF = 18.0
+AIM_DERIVATIVE_CUTOFF_HZ = 15.0
+AIM_DEADZONE = 0.0015
 AIM_SMOOTHING_HZ = 24.0
+AIM_MAX_TELEPORT_DISTANCE = 0.45
 
 # Keep the crosshair from disappearing off the edge.
 CROSSHAIR_MARGIN = 28
@@ -117,6 +122,7 @@ PINCH_CLOSE_THRESHOLD = 0.45
 PINCH_RELEASE_THRESHOLD = 0.62
 PINCH_RELEASE_STABLE_FRAMES = 1
 PINCH_COOLDOWN_SECONDS = 0.04
+PINCH_DEBOUNCE_FRAMES = 1
 PINCH_DISTANCE_FILTER_SAMPLES = 1
 
 # Visual effects durations (clean and brief)

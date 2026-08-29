@@ -334,7 +334,10 @@ class AimScreen:
         self._fire_pulse_until = now + 0.15
         self._game.stats.record_shot()
 
-        hit_bubble = self._game.targets.shoot(aim_pos)
+        # Retrieve pre-pinch anchor position to cancel mechanical squeeze jerk
+        impact_pos = self._aim.get_anchored_position(now)
+
+        hit_bubble = self._game.targets.shoot(impact_pos)
         if hit_bubble is not None:
             mult = self._game.combo.register_hit() if self._game.mode.allow_combo else 1
             pts = hit_bubble.base_score * mult
@@ -366,12 +369,12 @@ class AimScreen:
             )
 
             self.audio.play_sfx(hit_bubble.hit_sound_name)
-            self._shot = ShotEffect(position=aim_pos, created_at=now, expires_at=now + 0.2, hit=True)
+            self._shot = ShotEffect(position=impact_pos, created_at=now, expires_at=now + 0.2, hit=True)
         else:
             if self._game.mode.allow_combo:
                 self._game.combo.register_miss()
             self.audio.play_sfx("shot_fire")
-            self._shot = ShotEffect(position=aim_pos, created_at=now, expires_at=now + 0.2, hit=False)
+            self._shot = ShotEffect(position=impact_pos, created_at=now, expires_at=now + 0.2, hit=False)
 
     # -- Rendering Pipeline ------------------------------------------------
 
@@ -768,7 +771,7 @@ class AimScreen:
             hand_text, hand_color = "HAND: starting...", THEME.TEXT_SECONDARY
         elif result.fresh and result.hand is not None:
             tip = result.hand.index_tip_norm
-            hand_text = f"HAND: tracked ({tip[0]:.2f}, {tip[1]:.2f})"
+            hand_text = f"HAND: tracked {result.hand.handedness} ({result.hand.score:.2f})"
             hand_color = THEME.ACCENT_EMERALD
         elif result.coasting and result.hand is not None:
             hand_text = f"HAND: coasting ({result.stale_frames}f held)"
@@ -776,14 +779,26 @@ class AimScreen:
         else:
             hand_text, hand_color = "HAND: lost", THEME.ACCENT_CORAL
 
+        raw_in = self._aim.raw_input
+        filt_in = self._aim.filtered_input
+        vel = self._aim.velocity
+        speed = math.hypot(vel[0], vel[1])
+        fc = self._aim.current_cutoff_hz
+
+        if raw_in is not None and filt_in is not None:
+            raw_text = f"RAW/FILT: ({raw_in[0]:.2f},{raw_in[1]:.2f}) -> ({filt_in[0]:.2f},{filt_in[1]:.2f})"
+        else:
+            raw_text = "RAW/FILT: —"
+
+        vel_text = f"VEL/FC: {speed:4.2f} norm/s (fc={fc:4.1f}Hz)"
         aim_x, aim_y = round(self._aim.position[0]), round(self._aim.position[1])
-        aim_text = f"AIM: x={aim_x}, y={aim_y}"
+        aim_text = f"AIM PIXELS: x={aim_x}, y={aim_y}"
 
         pinch = pinch_result or self._last_pinch
         dist_val = pinch.normalized_distance if pinch is not None else None
         if dist_val is not None:
             dist_status = "PINCH" if dist_val <= settings.PINCH_CLOSE_THRESHOLD else ("OPEN" if dist_val >= settings.PINCH_RELEASE_THRESHOLD else "MID")
-            dist_text = f"PINCH DIST: {dist_val:.2f} ({dist_status})"
+            dist_text = f"PINCH: {dist_val:.2f} ({dist_status}) [{pinch.phase.name}]"
         else:
             dist_text = "PINCH: —"
 
@@ -796,20 +811,22 @@ class AimScreen:
         else:
             shot_text, shot_color = "SHOT: pinched / hold", THEME.ACCENT_PURPLE
 
-        stats_text = f"LIVES: {self._game.stats.lives}  HITS: {self._game.stats.targets_hit}  SHOTS: {self._game.stats.shots_fired}"
+        stats_text = f"LIVES: {self._game.stats.lives}  HITS: {self._game.stats.targets_hit}/{self._game.stats.shots_fired} ({self._game.stats.accuracy:.0f}%)"
 
-        y = r.top + 8
+        y = r.top + 7
         for line, col in [
             (cam_text, THEME.ACCENT_CYAN),
             (st_text, st_color),
             (hand_text, hand_color),
+            (raw_text, THEME.TEXT_SECONDARY),
+            (vel_text, THEME.ACCENT_PURPLE),
             (aim_text, THEME.TEXT_PRIMARY),
             (dist_text, THEME.ACCENT_GOLD),
             (shot_text, shot_color),
             (stats_text, THEME.ACCENT_CYAN),
         ]:
             self.typo.draw_text(screen, line, self.typo.monospace_debug, col, (r.left + 10, y), anchor="topleft")
-            y += 20
+            y += 18
 
         # Gauge bar at bottom of panel
         gauge_x = r.left + 10

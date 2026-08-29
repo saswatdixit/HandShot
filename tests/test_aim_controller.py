@@ -132,6 +132,30 @@ class AimControllerTests(unittest.TestCase):
         self.assertAlmostEqual(x, 590.0, delta=2.0)
         self.assertAlmostEqual(y, 110.0, delta=2.0)
 
+    def test_one_euro_adaptive_speed_scaling(self) -> None:
+        # Default controller with realistic 1€ settings
+        aim = AimController((1000, 500), AimSettings(
+            input_left=0.0, input_top=0.0, input_right=1.0, input_bottom=1.0,
+            deadzone=0.0, smoothing_hz=24.0, min_cutoff_hz=2.5, speed_coeff=18.0,
+        ))
+        aim.update((0.5, 0.5), 1 / 60)
+        # Stationary micro-jitter (dx=0.001) is heavily filtered
+        p_jitter = aim.update((0.501, 0.5), 1 / 60)
+        delta_jitter = p_jitter[0] - 500.0
+        self.assertLess(delta_jitter, 0.5)
+
+        # Fast intentional flick (dx=0.20) responds immediately with high alpha
+        p_fast = aim.update((0.70, 0.5), 1 / 60)
+        delta_fast = p_fast[0] - 500.0
+        self.assertGreater(delta_fast, 70.0)
+
+    def test_outlier_nan_coordinates_rejected(self) -> None:
+        aim = controller()
+        p0 = aim.update((0.5, 0.5), 1 / 60)
+        # Pass NaN
+        p_nan = aim.update((float("nan"), float("nan")), 1 / 60)
+        self.assertEqual(p_nan, p0)
+
 
 if __name__ == "__main__":
     unittest.main()
