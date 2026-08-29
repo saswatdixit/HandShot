@@ -1,7 +1,7 @@
-"""Dedicated Real-Time Camera & Hand Tracking Laboratory for HANDSHOT (Phase 13).
+"""Dedicated Real-Time Camera & Hand Tracking Laboratory for HANDSHOT.
 
 Provides live video feed, full 21-landmark hand skeleton visualization, index fingertip
-tracking, aim reticle response, pinch distance gauge, and instant camera source switching.
+tracking, aim reticle response, pinch distance gauge, and camera diagnostics.
 """
 
 from __future__ import annotations
@@ -16,18 +16,11 @@ import pygame
 
 from aim.aim_controller import AimController, AimSettings
 from camera.camera_manager import CameraManager
-from camera.camera_source import CameraSourceType
-from camera.qr_generator import QRCode
 from config import settings
 from game.theme import THEME
 from game.typography import Typography
 from game.ui_layout import UILayout
-from game.ui_renderer import (
-    draw_card,
-    draw_keycap,
-    draw_vector_phone,
-    draw_vector_webcam,
-)
+from game.ui_renderer import draw_card, draw_keycap
 from gestures.pinch_detector import PinchDetector, PinchPhase, PinchResult
 
 if TYPE_CHECKING:
@@ -62,8 +55,6 @@ class CameraPreviewScreen:
         self.tracker = tracker
         self._debug_hud = debug_hud
         self._show_landmarks = True
-        self._show_camera_setup = False
-        self.camera.ensure_phone_server_started()
 
         self.layout = UILayout((settings.GAME_WIDTH, settings.GAME_HEIGHT))
         self.typo = Typography((settings.GAME_WIDTH, settings.GAME_HEIGHT))
@@ -84,8 +75,6 @@ class CameraPreviewScreen:
         self._pinch = PinchDetector()
         self._last_pinch: PinchResult | None = None
         self._last_shot_time = 0.0
-        self._qr_surface: pygame.Surface | None = None
-        self._cached_qr_url: str | None = None
 
     def run(self, duration: float = 0.0) -> int:
         screen = pygame.display.set_mode(
@@ -160,26 +149,9 @@ class CameraPreviewScreen:
 
     def _handle_key(self, event: pygame.event.Event) -> bool:
         if event.key in (pygame.K_ESCAPE, pygame.K_q):
-            if self._show_camera_setup:
-                self._show_camera_setup = False
-                return True
             return False
 
-        if event.key == pygame.K_w:
-            # Switch between Local Camera and Phone Camera
-            if self.camera.is_phone:
-                self.camera.use_local_camera()
-            else:
-                self.camera.use_phone_camera()
-            self._aim.reset()
-            self._pinch.reset()
-            if self.tracker:
-                self.tracker.reset()
-
-        elif event.key == pygame.K_s or event.key == pygame.K_TAB:
-            self._show_camera_setup = not self._show_camera_setup
-
-        elif event.key == pygame.K_c:
+        if event.key == pygame.K_c:
             self.camera.toggle_mirror()
             self._aim.reset()
             self._pinch.reset()
@@ -216,11 +188,9 @@ class CameraPreviewScreen:
         feed_rect = pygame.Rect(0, 0, w, h)
         if frame is not None:
             fh, fw = frame.shape[:2]
-            # Convert BGR to RGB for Pygame surface
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             raw_surf = pygame.image.frombuffer(frame_rgb.tobytes(), (fw, fh), "RGB")
 
-            # Scale to fit screen preserving aspect ratio
             scale = min(w / fw, h / fh)
             sw, sh = round(fw * scale), round(fh * scale)
             scaled_surf = pygame.transform.scale(raw_surf, (sw, sh))
@@ -229,31 +199,20 @@ class CameraPreviewScreen:
             feed_y = (h - sh) // 2
             feed_rect = pygame.Rect(feed_x, feed_y, sw, sh)
 
-            # Darken camera frame slightly for high UI contrast
             dark_filter = pygame.Surface((sw, sh), pygame.SRCALPHA)
             dark_filter.fill((10, 13, 18, 90))
             scaled_surf.blit(dark_filter, (0, 0))
 
             screen.blit(scaled_surf, (feed_x, feed_y))
         else:
-            # Standby placeholder when waiting for frames
             self.typo.draw_text(
                 screen,
-                "WAITING FOR VIDEO FEED...",
+                "WAITING FOR CAMERA FEED...",
                 self.typo.h2,
                 THEME.TEXT_MUTED,
-                (w // 2, h // 2 - 20),
+                (w // 2, h // 2),
                 anchor="center",
             )
-            if self.camera.is_phone:
-                self.typo.draw_text(
-                    screen,
-                    f"Scan QR at {self.camera.pairing_url} with your phone",
-                    self.typo.body,
-                    THEME.ACCENT_CYAN,
-                    (w // 2, h // 2 + 16),
-                    anchor="center",
-                )
 
         # 2. Draw Hand Landmarks & Full Skeleton
         if self._show_landmarks and result is not None and result.hand is not None:
@@ -269,7 +228,7 @@ class CameraPreviewScreen:
         self.typo.draw_text(screen, "HANDSHOT", self.typo.h1, THEME.ACCENT_CYAN, (24, 10), anchor="topleft")
         self.typo.draw_text(screen, "CAMERA & TRACKING LABORATORY", self.typo.body_bold, THEME.TEXT_PRIMARY, (175, 18), anchor="topleft")
 
-        cam_name = "Phone Camera" if self.camera.is_phone else f"Computer Webcam ({self.camera.index})"
+        cam_name = f"Webcam ({self.camera.index})"
         fps_txt = f"{self.camera.measured_fps:.1f} FPS"
         self.typo.draw_text(screen, f"{cam_name}  •  {fps_txt}", self.typo.body_bold, THEME.ACCENT_GOLD, (w - 24, 18), anchor="topright")
 
@@ -278,8 +237,6 @@ class CameraPreviewScreen:
         draw_card(screen, controls_rect, (12, 16, 24, 230), THEME.BORDER_SUBTLE, border_radius=8)
 
         items = [
-            ("W", "SWITCH CAM", self.camera.is_phone, THEME.ACCENT_CYAN),
-            ("S", "SETUP / QR", self._show_camera_setup, THEME.ACCENT_GOLD),
             ("C", "MIRROR " + ("ON" if self.camera.mirror else "OFF"), self.camera.mirror, THEME.TEXT_PRIMARY),
             ("L", "LANDMARKS " + ("ON" if self._show_landmarks else "OFF"), self._show_landmarks, THEME.ACCENT_EMERALD),
             ("D", "DEBUG HUD", self._debug_hud, THEME.ACCENT_GOLD),
@@ -306,10 +263,6 @@ class CameraPreviewScreen:
         if self._debug_hud:
             self._draw_diagnostics(screen, result, pinch_result, aim_pos, now)
 
-        # 7. Camera Selection / QR Overlay (if toggled with S / TAB)
-        if self._show_camera_setup:
-            self._draw_camera_modal(screen, w, h)
-
     def _draw_hand_skeleton(
         self,
         screen: pygame.Surface,
@@ -335,7 +288,6 @@ class CameraPreviewScreen:
         # Landmarks
         for i, (px, py) in enumerate(points):
             if i == 8:  # Index fingertip
-                # Glow halo
                 pygame.draw.circle(screen, (90, 215, 255, 80), (px, py), 12)
                 pygame.draw.circle(screen, THEME.ACCENT_CYAN, (px, py), 7)
                 pygame.draw.circle(screen, (255, 255, 255), (px, py), 3)
@@ -376,7 +328,7 @@ class CameraPreviewScreen:
         draw_card(screen, r, (10, 14, 22, 235), THEME.BORDER_SUBTLE, border_radius=8)
 
         cam_fps = self.camera.measured_fps
-        src_name = "PHONE_STREAM" if self.camera.is_phone else f"LOCAL_WEBCAM ({self.camera.backend_name})"
+        src_name = f"WEBCAM ({self.camera.backend_name})"
 
         if result is None:
             hand_stat, hand_col = "SEARCHING...", THEME.TEXT_MUTED
@@ -430,55 +382,3 @@ class CameraPreviewScreen:
         if dist_val is not None:
             cur_x = gauge_x + round(min(1.0, max(0.0, dist_val / max_disp)) * gauge_w)
             pygame.draw.circle(screen, THEME.TEXT_PRIMARY, (cur_x, gauge_y + gauge_h // 2), 4)
-
-    def _draw_camera_modal(self, screen: pygame.Surface, width: int, height: int) -> None:
-        """Display camera switcher & phone pairing QR overlay."""
-        overlay = pygame.Surface((width, height), pygame.SRCALPHA)
-        overlay.fill((*THEME.BG_DARK, 240))
-        screen.blit(overlay, (0, 0))
-
-        r = pygame.Rect(width // 2 - 280, height // 2 - 220, 560, 440)
-        draw_card(screen, r, THEME.BG_SURFACE, THEME.BORDER_FOCUS, border_width=2, border_radius=14)
-
-        self.typo.draw_text(screen, "PHONE WEBCAM SETUP", self.typo.h1, THEME.ACCENT_CYAN, (r.centerx, r.top + 24), anchor="center")
-
-        # Guarantee server is running and get live URL
-        url = self.camera.pairing_url
-        if self._qr_surface is None or self._cached_qr_url != url:
-            self._qr_surface = QRCode(url).to_surface(module_size=6, quiet_zone=4, bg_color=(255, 255, 255), fg_color=(0, 0, 0))
-            self._cached_qr_url = url
-
-        qr_x = r.centerx - self._qr_surface.get_width() // 2
-        qr_y = r.top + 60
-        screen.blit(self._qr_surface, (qr_x, qr_y))
-
-        # URL Text
-        url_y = qr_y + self._qr_surface.get_height() + 12
-        self.typo.draw_text(screen, url, self.typo.h2, THEME.ACCENT_CYAN, (r.centerx, url_y), anchor="center")
-
-        # Connection Status
-        phone_conn = (self.camera.is_phone and self.camera.source.is_connected) or self.camera.phone_server.is_connected
-        if phone_conn:
-            facing = self.camera.phone_server.facing_mode.upper()
-            fps_val = self.camera.phone_server.measured_fps
-            stat_txt = f"● PHONE CONNECTED • STREAMING ({fps_val:.0f} FPS) • {facing}"
-            stat_col = THEME.ACCENT_EMERALD
-        elif self.camera.phone_server.is_adb_mode:
-            stat_txt = "● USB / ADB REVERSE ACTIVE • Localhost Ready"
-            stat_col = THEME.ACCENT_EMERALD
-        else:
-            stat_txt = "● SERVER READY  •  ○ WAITING FOR PHONE"
-            stat_col = THEME.ACCENT_GOLD
-
-        self.typo.draw_text(screen, stat_txt, self.typo.body_bold, stat_col, (r.centerx, url_y + 30), anchor="center")
-        hint = "USB Connection Active" if self.camera.phone_server.is_adb_mode else "Scan with phone on same Wi-Fi / USB network"
-        self.typo.draw_text(screen, hint, self.typo.body_small, THEME.TEXT_MUTED, (r.centerx, url_y + 52), anchor="center")
-
-        self.typo.draw_text(
-            screen,
-            "[ W ] Switch Local / Phone Cam    [ ESC / S ] Close Setup",
-            self.typo.button,
-            THEME.ACCENT_GOLD,
-            (r.centerx, r.bottom - 22),
-            anchor="center",
-        )

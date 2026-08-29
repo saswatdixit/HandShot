@@ -1,4 +1,4 @@
-"""Unit tests for Phase 12 Camera Source abstractions and CameraManager."""
+"""Unit tests for Camera Source abstractions and CameraManager."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ import numpy as np
 
 from camera.camera_source import CameraSource, CameraSourceType
 from camera.camera_manager import CameraManager
-from camera.phone_camera import PhoneCameraSource
 
 
 class MockCameraSource(CameraSource):
@@ -91,25 +90,6 @@ class CameraSourceTests(unittest.TestCase):
 
         manager.release()
         self.assertFalse(mock.is_connected)
-
-    def test_phone_camera_source_instantiation(self) -> None:
-        phone_src = PhoneCameraSource(port=9099)
-        self.assertEqual(phone_src.source_type, CameraSourceType.PHONE)
-        self.assertIn("http://", phone_src.pairing_url)
-        self.assertIn(":9099", phone_src.pairing_url)
-        self.assertFalse(phone_src.is_connected)
-
-    def test_camera_manager_phone_server_integration(self) -> None:
-        mock = MockCameraSource()
-        manager = CameraManager(source=mock)
-        try:
-            # pairing_url should guarantee server is listening
-            url = manager.pairing_url
-            self.assertIn("http://", url)
-            self.assertTrue(manager.phone_server.is_running)
-        finally:
-            manager.release()
-            self.assertFalse(manager.phone_server.is_running)
 
 
 if __name__ == "__main__":

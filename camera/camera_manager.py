@@ -1,10 +1,8 @@
-"""Unified Camera Manager supporting local USB/built-in webcams and wireless phone cameras (Phase 13)."""
+"""Unified Camera Manager supporting local USB and built-in webcams for HANDSHOT."""
 
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING
-
 import numpy as np
 
 from camera.camera_source import CameraSource, CameraSourceType
@@ -14,16 +12,11 @@ from camera.local_camera import (
     CameraInfo,
     LocalCameraSource,
 )
-from camera.phone_camera import PhoneCameraSource
-from camera.phone_server import PhoneStreamServer
 from config import settings
-
-if TYPE_CHECKING:
-    pass
 
 
 class CameraManager:
-    """Master video feed coordinator for local webcams and mobile camera streaming."""
+    """Master video feed coordinator for local webcams."""
 
     def __init__(
         self,
@@ -41,8 +34,6 @@ class CameraManager:
         self._req_mirror = mirror
         self._backend = backend
         self.threaded = threaded
-        self._phone_server = PhoneStreamServer.get_instance(port=8088)
-        self.ensure_phone_server_started()
 
         if source is not None:
             self._source: CameraSource = source
@@ -63,31 +54,6 @@ class CameraManager:
     @property
     def source_type(self) -> CameraSourceType:
         return self._source.source_type
-
-    @property
-    def is_phone(self) -> bool:
-        return self._source.source_type is CameraSourceType.PHONE
-
-    @property
-    def phone_source(self) -> PhoneCameraSource | None:
-        if isinstance(self._source, PhoneCameraSource):
-            return self._source
-        return None
-
-    @property
-    def phone_server(self) -> PhoneStreamServer:
-        return self._phone_server
-
-    @property
-    def pairing_url(self) -> str:
-        """Return live pairing URL, ensuring the HTTP server is actively listening on 0.0.0.0."""
-        self.ensure_phone_server_started()
-        return self._phone_server.pairing_url
-
-    def ensure_phone_server_started(self) -> None:
-        """Guarantee that the phone streaming server is active and listening."""
-        if not self._phone_server.is_running:
-            self._phone_server.start()
 
     @property
     def index(self) -> int:
@@ -119,7 +85,7 @@ class CameraManager:
     def backend_name(self) -> str:
         if isinstance(self._source, LocalCameraSource):
             return self._source.backend_name
-        return "PHONE_NET"
+        return "UNKNOWN"
 
     @property
     def open_seconds(self) -> float:
@@ -147,8 +113,6 @@ class CameraManager:
 
     def release(self) -> None:
         self._source.release()
-        if self._phone_server.is_running:
-            self._phone_server.stop()
 
     def toggle_mirror(self) -> bool:
         return self._source.toggle_mirror()
@@ -179,15 +143,6 @@ class CameraManager:
         )
         self._source.open()
 
-    def use_phone_camera(self, port: int = 8088) -> None:
-        """Switch to a mobile phone camera stream over USB/ADB or LAN network."""
-        if isinstance(self._source, PhoneCameraSource):
-            return
-        old_mirror = self._source.mirror
-        self._source.release()
-        self._source = PhoneCameraSource(port=port, mirror=old_mirror, server=self._phone_server)
-        self._source.open()
-
     @staticmethod
     def list_cameras(limit: int = settings.CAMERA_PROBE_LIMIT) -> list[CameraInfo]:
         return LocalCameraSource.list_cameras(limit)
@@ -201,17 +156,15 @@ def select_camera_interactively() -> int:
     if len(cameras) == 1:
         return cameras[0].index
 
-    print("\nAvailable cameras:")
-    for info in cameras:
-        print(f"  {info}")
+    print("\nConnected cameras:")
+    for c in cameras:
+        print(f"  [{c.index}] {c.name} ({c.width}x{c.height})")
     while True:
         try:
-            choice = input(f"\nSelect camera index [default {cameras[0].index}]: ").strip()
-            if not choice:
-                return cameras[0].index
+            choice = input(f"\nSelect camera index [0-{len(cameras)-1}]: ").strip()
             idx = int(choice)
             if any(c.index == idx for c in cameras):
                 return idx
-            print(f"Invalid index. Choose from: {[c.index for c in cameras]}")
-        except ValueError:
-            print("Please enter a valid numeric camera index.")
+        except (ValueError, EOFError, KeyboardInterrupt):
+            pass
+        print("Invalid choice, please try again.")

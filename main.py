@@ -71,10 +71,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                              "thread (slower; for comparison/debugging)")
     parser.add_argument("--no-tracking", action="store_true",
                         help="camera only, skip MediaPipe (tests Phase 1 alone)")
-    parser.add_argument("--phone-camera", action="store_true",
-                        help="use wireless mobile phone camera stream via QR code pairing")
     parser.add_argument("--preview", action="store_true",
-                        help="open the interactive UI development preview with live screen cycling")
+                        help="open the interactive tracking laboratory preview")
     parser.add_argument("--check", nargs="?", type=int, const=90, default=None,
                         metavar="FRAMES",
                         help="run headless diagnostics over FRAMES frames (default 90)")
@@ -82,7 +80,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         metavar="PATH", help="save one annotated frame and exit")
     parser.add_argument("--debug-gestures", action="store_true",
                         help="open game with live gesture diagnostics HUD enabled")
-    parser.add_argument("--ui-preview", choices=["select", "camera", "ready", "countdown", "playing", "paused", "results"],
+    parser.add_argument("--ui-preview", choices=["select", "ready", "countdown", "playing", "paused", "results"],
                         default=None, help="directly preview a specific UI screen state")
     parser.add_argument("--duration", type=float, default=0.0, metavar="SECONDS",
                         help="auto-close the preview after N seconds (0 = manual)")
@@ -104,10 +102,7 @@ def open_camera(args: argparse.Namespace) -> CameraManager:
         backend=args.backend,
         threaded=not args.no_threaded_capture,
     )
-    if getattr(args, "phone_camera", False):
-        camera.use_phone_camera()
-    else:
-        camera.open()
+    camera.open()
     return camera
 
 
@@ -347,7 +342,7 @@ def cmd_snapshot(args: argparse.Namespace) -> int:
 
 
 def run_preview(args: argparse.Namespace) -> int:
-    """Real-time Camera & Hand Tracking Laboratory (Phase 13)."""
+    """Real-time Camera & Hand Tracking Laboratory."""
     try:
         from camera.preview_screen import CameraPreviewScreen
     except ModuleNotFoundError as exc:
@@ -359,7 +354,7 @@ def run_preview(args: argparse.Namespace) -> int:
     camera = open_camera(args)
     tracker = create_tracker(args)
     print("HANDSHOT Camera & Tracking Laboratory:")
-    print("Controls: [W] Switch Camera  [C] Mirror  [L] Landmarks  [D] Diagnostics  [S] Setup/QR  [ESC] Exit")
+    print("Controls: [C] Mirror  [L] Landmarks  [D] Diagnostics  [R] Reset  [ESC] Exit")
 
     try:
         screen_app = CameraPreviewScreen(camera, tracker, debug_hud=args.debug_gestures or True)
@@ -373,7 +368,7 @@ def run_preview(args: argparse.Namespace) -> int:
 
 
 def run_game(args: argparse.Namespace) -> int:
-    """Phase 12 Pygame blue-bubble game."""
+    """Pygame arcade blue-bubble game."""
     try:
         from game.aim_screen import AimScreen
         from game.bubble_game import GameState
@@ -394,7 +389,6 @@ def run_game(args: argparse.Namespace) -> int:
         if args.ui_preview:
             preview_state_map = {
                 "select": GameState.MODE_SELECT,
-                "camera": GameState.CAMERA_SELECT,
                 "ready": GameState.READY,
                 "countdown": GameState.COUNTDOWN,
                 "playing": GameState.PLAYING,

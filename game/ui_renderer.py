@@ -233,24 +233,6 @@ def draw_vector_speaker(
         surface.blit(arc_surf, (x - round(r * 0.2), y - r))
 
 
-def draw_vector_phone(
-    surface: pygame.Surface,
-    cx: float,
-    cy: float,
-    w: float = 14.0,
-    h: float = 24.0,
-    color: tuple[int, int, int] = THEME.ACCENT_CYAN,
-) -> None:
-    """Draw a clean vector smartphone icon."""
-    x = round(cx - w / 2)
-    y = round(cy - h / 2)
-    pygame.draw.rect(surface, color, (x, y, round(w), round(h)), 2, border_radius=4)
-    # Screen inner area
-    pygame.draw.rect(surface, (color[0], color[1], color[2]), (x + 2, y + 4, round(w) - 4, round(h) - 8), 1)
-    # Home bar / notch dot
-    pygame.draw.line(surface, color, (cx - 2, y + h - 2), (cx + 2, y + h - 2), 1)
-
-
 def draw_vector_webcam(
     surface: pygame.Surface,
     cx: float,

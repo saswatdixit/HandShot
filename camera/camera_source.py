@@ -1,4 +1,4 @@
-"""Abstract Camera Source interface for HANDSHOT (Phase 12)."""
+"""Abstract Camera Source interface for HANDSHOT."""
 
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ class CameraSourceType(Enum):
     """Supported video capture hardware sources."""
 
     LOCAL = auto()
-    PHONE = auto()
 
 
 class CameraSource(ABC):
@@ -21,12 +20,12 @@ class CameraSource(ABC):
     @property
     @abstractmethod
     def source_type(self) -> CameraSourceType:
-        """Return LOCAL or PHONE."""
+        """Return LOCAL."""
 
     @property
     @abstractmethod
     def source_name(self) -> str:
-        """Human-readable name of the source (e.g. 'Built-in Webcam', 'Phone Camera')."""
+        """Human-readable name of the source (e.g. 'Built-in Webcam')."""
 
     @property
     @abstractmethod
@@ -76,4 +75,4 @@ class CameraSource(ABC):
 
     @abstractmethod
     def describe(self) -> str:
-        """Diagnostic summary string."""
+        """Return a single-line summary string of the camera state."""

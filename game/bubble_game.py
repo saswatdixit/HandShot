@@ -22,7 +22,6 @@ class GameState(Enum):
     """Core game states across the arcade lifecycle."""
 
     MODE_SELECT = auto()   # Select between Classic, Chill, Timed, Practice
-    CAMERA_SELECT = auto() # Choose local webcam vs phone camera QR pairing
     READY = auto()         # Waiting for hand tracking to stabilize
     COUNTDOWN = auto()     # 3 -> 2 -> 1 -> GO!
     PLAYING = auto()       # Active gameplay

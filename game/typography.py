@@ -105,10 +105,15 @@ class Typography:
         if not text:
             return pygame.Rect(int(pos[0]), int(pos[1]), 0, 0)
         surf = font.render(text, True, color[:3])
-        if len(color) == 4 and color[3] < 255:
-            surf.set_alpha(color[3])
         rect = surf.get_rect()
-        setattr(rect, anchor, (round(pos[0]), round(pos[1])))
+        anchor_map = {
+            "left": "midleft",
+            "right": "midright",
+            "top": "midtop",
+            "bottom": "midbottom",
+        }
+        resolved_anchor = anchor_map.get(anchor, anchor)
+        setattr(rect, resolved_anchor, (round(pos[0]), round(pos[1])))
         surface.blit(surf, rect)
         return rect
 
