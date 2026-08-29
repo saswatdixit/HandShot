@@ -433,31 +433,45 @@ class CameraPreviewScreen:
     def _draw_camera_modal(self, screen: pygame.Surface, width: int, height: int) -> None:
         """Display camera switcher & phone pairing QR overlay."""
         overlay = pygame.Surface((width, height), pygame.SRCALPHA)
-        overlay.fill((*THEME.BG_DARK, 235))
+        overlay.fill((*THEME.BG_DARK, 240))
         screen.blit(overlay, (0, 0))
 
-        r = pygame.Rect(width // 2 - 250, height // 2 - 190, 500, 380)
+        r = pygame.Rect(width // 2 - 280, height // 2 - 220, 560, 440)
         draw_card(screen, r, THEME.BG_SURFACE, THEME.BORDER_FOCUS, border_width=2, border_radius=14)
 
-        self.typo.draw_text(screen, "CAMERA SETUP", self.typo.h1, THEME.ACCENT_CYAN, (r.centerx, r.top + 28), anchor="center")
+        self.typo.draw_text(screen, "PHONE WEBCAM SETUP", self.typo.h1, THEME.ACCENT_CYAN, (r.centerx, r.top + 24), anchor="center")
 
-        url = self.camera.pairing_url or "http://127.0.0.1:8088/"
+        url = self.camera.pairing_url or f"http://{self.camera.phone_source.server.lan_ip if self.camera.phone_source else '127.0.0.1'}:8088/"
         if self._qr_surface is None or self._cached_qr_url != url:
-            self._qr_surface = QRCode(url).to_surface(module_size=5, quiet_zone=3)
+            self._qr_surface = QRCode(url).to_surface(module_size=6, quiet_zone=4, bg_color=(255, 255, 255), fg_color=(0, 0, 0))
             self._cached_qr_url = url
 
         qr_x = r.centerx - self._qr_surface.get_width() // 2
-        qr_y = r.top + 70
+        qr_y = r.top + 60
         screen.blit(self._qr_surface, (qr_x, qr_y))
 
-        self.typo.draw_text(screen, url, self.typo.body_bold, THEME.ACCENT_CYAN, (r.centerx, qr_y + self._qr_surface.get_height() + 14), anchor="center")
-        self.typo.draw_text(screen, "Scan with your phone to use as a wireless webcam", self.typo.body_small, THEME.TEXT_SECONDARY, (r.centerx, qr_y + self._qr_surface.get_height() + 34), anchor="center")
+        # URL Text
+        url_y = qr_y + self._qr_surface.get_height() + 12
+        self.typo.draw_text(screen, url, self.typo.h2, THEME.ACCENT_CYAN, (r.centerx, url_y), anchor="center")
+
+        # Connection Status
+        phone_conn = (self.camera.is_phone and self.camera.source.is_connected)
+        if phone_conn:
+            facing = getattr(self.camera.source, "facing_mode", "environment").upper()
+            stat_txt = f"● PHONE CONNECTED • STREAMING ({self.camera.measured_fps:.0f} FPS) • {facing}"
+            stat_col = THEME.ACCENT_EMERALD
+        else:
+            stat_txt = "● SERVER READY  •  ○ WAITING FOR PHONE"
+            stat_col = THEME.ACCENT_GOLD
+
+        self.typo.draw_text(screen, stat_txt, self.typo.body_bold, stat_col, (r.centerx, url_y + 30), anchor="center")
+        self.typo.draw_text(screen, "Both devices must be on the same Wi-Fi network", self.typo.body_small, THEME.TEXT_MUTED, (r.centerx, url_y + 52), anchor="center")
 
         self.typo.draw_text(
             screen,
-            "[ W ] Toggle Local / Phone Cam    [ ESC / S ] Close Setup",
-            self.typo.body_small,
+            "[ W ] Switch Local / Phone Cam    [ ESC / S ] Close Setup",
+            self.typo.button,
             THEME.ACCENT_GOLD,
-            (r.centerx, r.bottom - 24),
+            (r.centerx, r.bottom - 22),
             anchor="center",
         )

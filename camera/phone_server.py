@@ -1,8 +1,9 @@
-"""High-performance, low-latency LAN HTTP phone streaming server for HANDSHOT (Phase 12)."""
+"""High-performance, low-latency LAN HTTP phone streaming server for HANDSHOT (Phase 13)."""
 
 from __future__ import annotations
 
 import http.server
+import json
 import socket
 import threading
 import time
@@ -20,18 +21,33 @@ HTML_PATH = Path(__file__).parent / "web" / "phone_camera.html"
 
 def get_lan_ip() -> str:
     """Dynamically determine the host computer's active local network LAN IP."""
+    # Strategy 1: Connect UDP socket to gateway (no packet sent, determines route interface)
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.settimeout(0.2)
         s.connect(("8.8.8.8", 80))
         ip = s.getsockname()[0]
         s.close()
-        return ip
+        if ip and not ip.startswith("127.") and not ip.startswith("169.254."):
+            return ip
     except Exception:
-        try:
-            return socket.gethostbyname(socket.gethostname())
-        except Exception:
-            return "127.0.0.1"
+        pass
+
+    # Strategy 2: Probe local hostname addresses
+    try:
+        hostname = socket.gethostname()
+        candidates = socket.gethostbyname_ex(hostname)[2]
+        # Prioritize standard LAN subnets (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
+        for ip in candidates:
+            if ip.startswith("192.168.") or ip.startswith("10."):
+                return ip
+        for ip in candidates:
+            if not ip.startswith("127.") and not ip.startswith("169.254."):
+                return ip
+    except Exception:
+        pass
+
+    return "127.0.0.1"
 
 
 class PhoneStreamServer:
@@ -69,6 +85,9 @@ class PhoneStreamServer:
         if self._running:
             return
 
+        # Refresh LAN IP on start
+        self.lan_ip = get_lan_ip()
+
         # Attempt binding to preferred port, scanning upwards on collision
         bound = False
         for p in range(self.preferred_port, self.preferred_port + 20):
@@ -82,11 +101,22 @@ class PhoneStreamServer:
                 continue
 
         if not bound or self._server is None:
-            raise RuntimeError(f"Could not bind phone streaming server to ports {self.preferred_port}..{self.preferred_port+20}")
+            raise RuntimeError(
+                f"Could not bind phone streaming server to ports {self.preferred_port}..{self.preferred_port+20}"
+            )
 
         self._running = True
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
+
+        # Print prominent terminal banner for debugging
+        print("\n" + "=" * 62)
+        print("  HANDSHOT WIRELESS PHONE CAMERA SERVER ACTIVE")
+        print("=" * 62)
+        print(f"  Webcam Pairing URL : {self.pairing_url}")
+        print(f"  Health Check       : http://{self.lan_ip}:{self.port}/health")
+        print("  Requirement        : Phone & PC must be on SAME Wi-Fi")
+        print("=" * 62 + "\n")
 
     def stop(self) -> None:
         self._running = False
@@ -120,11 +150,28 @@ class PhoneStreamServer:
                         self.send_response(200)
                         self.send_header("Content-Type", "text/html; charset=utf-8")
                         self.send_header("Content-Length", str(len(content)))
-                        self.send_header("Cache-Control", "no-cache")
+                        self.send_header("Access-Control-Allow-Origin", "*")
+                        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
                         self.end_headers()
                         self.wfile.write(content)
                     except Exception as e:
                         self.send_error(500, f"Error loading phone camera UI: {e}")
+                elif self.path == "/health":
+                    data = json.dumps({
+                        "status": "ok",
+                        "service": "handshot-phone-camera",
+                        "lan_ip": server_inst.lan_ip,
+                        "port": server_inst.port,
+                        "connected": server_inst.is_connected,
+                        "fps": round(server_inst.measured_fps, 1),
+                        "frames_received": server_inst.frames_received,
+                    }).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.end_headers()
+                    self.wfile.write(data)
                 else:
                     self.send_error(404, "Not Found")
 
@@ -154,7 +201,9 @@ class PhoneStreamServer:
 
                             server_inst._fps_frame_count += 1
                             if now - server_inst._fps_window_start >= 1.0:
-                                server_inst.measured_fps = server_inst._fps_frame_count / (now - server_inst._fps_window_start)
+                                server_inst.measured_fps = server_inst._fps_frame_count / (
+                                    now - server_inst._fps_window_start
+                                )
                                 server_inst._fps_frame_count = 0
                                 server_inst._fps_window_start = now
 

@@ -708,27 +708,27 @@ class AimScreen:
         self.typo.draw_text(screen, "Phone Camera (QR)", self.typo.h2, THEME.TEXT_PRIMARY, (c1_x + card_w // 2, start_y + 75), anchor="center")
 
         # QR Code Rendering
-        url = self.camera.pairing_url if self.camera and self.camera.pairing_url else "http://192.168.1.10:8088/"
+        url = self.camera.pairing_url if self.camera and self.camera.pairing_url else "http://127.0.0.1:8088/"
         if self._qr_surface is None or self._cached_qr_url != url:
-            self._qr_surface = QRCode(url).to_surface(module_size=4, quiet_zone=2)
+            self._qr_surface = QRCode(url).to_surface(module_size=5, quiet_zone=4, bg_color=(255, 255, 255), fg_color=(0, 0, 0))
             self._cached_qr_url = url
 
         qr_x = c1_x + (card_w - self._qr_surface.get_width()) // 2
-        qr_y = start_y + 100
+        qr_y = start_y + 90
         screen.blit(self._qr_surface, (qr_x, qr_y))
 
         # Connection status below QR
         phone_connected = (self.camera is not None and self.camera.is_phone and self.camera.source.is_connected)
         if phone_connected:
-            p_stat, p_col = "Phone Connected & Streaming", THEME.ACCENT_EMERALD
+            p_stat, p_col = f"● Phone Connected ({self.camera.measured_fps:.0f} FPS)", THEME.ACCENT_EMERALD
         else:
-            p_stat, p_col = "Scan with phone on same Wi-Fi", THEME.ACCENT_GOLD
+            p_stat, p_col = "● Waiting for Phone • Same Wi-Fi Required", THEME.ACCENT_GOLD
 
-        self.typo.draw_text(screen, url, self.typo.body_bold, THEME.ACCENT_CYAN, (c1_x + card_w // 2, qr_y + self._qr_surface.get_height() + 16), anchor="center")
-        self.typo.draw_text(screen, p_stat, self.typo.body_small, p_col, (c1_x + card_w // 2, qr_y + self._qr_surface.get_height() + 36), anchor="center")
+        self.typo.draw_text(screen, url, self.typo.h2, THEME.ACCENT_CYAN, (c1_x + card_w // 2, qr_y + self._qr_surface.get_height() + 10), anchor="center")
+        self.typo.draw_text(screen, p_stat, self.typo.body_small, p_col, (c1_x + card_w // 2, qr_y + self._qr_surface.get_height() + 32), anchor="center")
 
         if is_phone_sel:
-            draw_keycap(screen, "ACTIVE", "", self.typo.label, self.typo.caption, c1_x + card_w // 2, start_y + card_h - 40, active=True, active_color=THEME.ACCENT_EMERALD)
+            draw_keycap(screen, "ACTIVE", "", self.typo.label, self.typo.caption, c1_x + card_w // 2, start_y + card_h - 26, active=True, active_color=THEME.ACCENT_EMERALD)
 
         # Footer
         self.typo.draw_text(
@@ -984,9 +984,13 @@ class AimScreen:
         draw_card(screen, r, (10, 14, 22, 235), THEME.BORDER_SUBTLE, border_radius=8)
 
         cam_fps = self.camera.measured_fps if self.camera is not None else 0.0
-        cam_backend = self.camera.backend_name if self.camera is not None else "n/a"
-        cam_src = "PHONE" if self.camera and self.camera.is_phone else "LOCAL"
-        cam_text = f"CAM: {cam_src} ({cam_fps:.0f} FPS, {cam_backend})"
+        if self.camera and self.camera.is_phone:
+            facing = getattr(self.camera.source, "facing_mode", "environment").upper()
+            cam_text = f"CAM: PHONE ({facing}, {cam_fps:.0f} FPS)"
+        elif self.camera is not None:
+            cam_text = f"CAM: LOCAL ({self.camera.backend_name}, {cam_fps:.0f} FPS)"
+        else:
+            cam_text = "CAM: n/a"
 
         st = self._game.state
         if st is GameState.MODE_SELECT:
