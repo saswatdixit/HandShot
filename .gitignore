@@ -1,11 +1,1 @@
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-
-# Downloaded on first run by camera/hand_tracker.ensure_model()
-assets/models/*.task
-assets/models/*.task.part
-
-# Dev captures
-data/snapshots/
+.claude
