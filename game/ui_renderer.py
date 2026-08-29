@@ -1,4 +1,4 @@
-"""Custom vector UI icons, refined target renderers, and primitives for HANDSHOT (Phase 12). Zero emoji dependencies."""
+"""Custom vector UI icons, reusable primitives, and refined components for HANDSHOT."""
 
 from __future__ import annotations
 
@@ -8,15 +8,18 @@ import pygame
 from game.theme import THEME
 
 
+# ── Card Primitive ──────────────────────────────────────────────────────
+
+
 def draw_card(
     surface: pygame.Surface,
     rect: tuple[int, int, int, int] | pygame.Rect,
     bg_color: tuple[int, int, int] | tuple[int, int, int, int] = THEME.BG_SURFACE,
     border_color: tuple[int, int, int] | tuple[int, int, int, int] | None = THEME.BORDER_SUBTLE,
-    border_width: int = 1,
-    border_radius: int = 12,
+    border_width: int = THEME.BORDER_W_THIN,
+    border_radius: int = THEME.RADIUS_MD,
 ) -> pygame.Rect:
-    """Draw an elegant rounded card panel with optional alpha and border."""
+    """Draw a rounded card panel with optional alpha and border."""
     x, y, w, h = rect
     r = pygame.Rect(x, y, w, h)
     card_surf = pygame.Surface((w, h), pygame.SRCALPHA)
@@ -34,6 +37,39 @@ def draw_card(
     return r
 
 
+# ── Progress Bar ────────────────────────────────────────────────────────
+
+
+def draw_progress_bar(
+    surface: pygame.Surface,
+    x: int, y: int, w: int, h: int,
+    progress: float,
+    bg_color: tuple[int, int, int] = THEME.BG_SURFACE_ELEVATED,
+    fill_color: tuple[int, int, int] = THEME.ACCENT_EMERALD,
+    border_radius: int = 3,
+) -> None:
+    """Draw a thin, clean progress bar."""
+    pygame.draw.rect(surface, bg_color, (x, y, w, h), border_radius=border_radius)
+    fill_w = max(0, min(w, round(w * progress)))
+    if fill_w > 0:
+        pygame.draw.rect(surface, fill_color, (x, y, fill_w, h), border_radius=border_radius)
+
+
+# ── Separator ───────────────────────────────────────────────────────────
+
+
+def draw_separator(
+    surface: pygame.Surface,
+    x1: int, y: int, x2: int,
+    color: tuple[int, int, int] = THEME.BORDER_SUBTLE,
+) -> None:
+    """Draw a thin horizontal separator line."""
+    pygame.draw.line(surface, color, (x1, y), (x2, y), 1)
+
+
+# ── Keycap ──────────────────────────────────────────────────────────────
+
+
 def draw_keycap(
     surface: pygame.Surface,
     key_text: str,
@@ -45,24 +81,24 @@ def draw_keycap(
     active: bool = False,
     active_color: tuple[int, int, int] = THEME.ACCENT_GOLD,
 ) -> pygame.Rect:
-    """Render an elegant keycap + label unit (e.g. [P] PAUSE)."""
+    """Render a refined keycap + label unit (e.g. [P] PAUSE)."""
     kw, kh = font.size(key_text)
     lw, lh = small_font.size(label_text) if label_text else (0, 0)
 
-    box_pad_x = 7
-    box_w = max(22, kw + box_pad_x * 2)
+    box_pad_x = 6
+    box_w = max(20, kw + box_pad_x * 2)
     box_h = kh + 4
 
     total_w = box_w + (lw + 6 if label_text else 0)
     start_x = round(cx - total_w / 2)
     start_y = round(cy - box_h / 2)
 
-    box_bg = (30, 42, 60) if active else (18, 24, 34)
+    box_bg = THEME.BG_SURFACE_HIGHLIGHT if active else THEME.BG_SURFACE
     box_border = active_color if active else THEME.BORDER_SUBTLE
     key_col = active_color if active else THEME.TEXT_PRIMARY
 
-    pygame.draw.rect(surface, box_bg, (start_x, start_y, box_w, box_h), border_radius=5)
-    pygame.draw.rect(surface, box_border, (start_x, start_y, box_w, box_h), 1, border_radius=5)
+    pygame.draw.rect(surface, box_bg, (start_x, start_y, box_w, box_h), border_radius=4)
+    pygame.draw.rect(surface, box_border, (start_x, start_y, box_w, box_h), 1, border_radius=4)
 
     k_surf = font.render(key_text, True, key_col)
     surface.blit(k_surf, k_surf.get_rect(center=(start_x + box_w // 2, start_y + box_h // 2)))
@@ -75,6 +111,9 @@ def draw_keycap(
     return pygame.Rect(start_x, start_y, total_w, box_h)
 
 
+# ── Control Bar ─────────────────────────────────────────────────────────
+
+
 def draw_control_bar(
     surface: pygame.Surface,
     rect: pygame.Rect,
@@ -83,7 +122,7 @@ def draw_control_bar(
     debug_on: bool = False,
 ) -> None:
     """Draw the refined minimalist bottom control strip."""
-    draw_card(surface, rect, (12, 16, 24, 210), THEME.BORDER_SUBTLE, border_width=1, border_radius=8)
+    draw_card(surface, rect, (*THEME.BG_SURFACE[:3], 210), THEME.BORDER_SUBTLE, border_width=1, border_radius=THEME.RADIUS_SM)
 
     items = [
         ("P", "PAUSE", False, THEME.TEXT_PRIMARY),
@@ -107,6 +146,9 @@ def draw_control_bar(
             active=is_act,
             active_color=act_col,
         )
+
+
+# ── Vector Icons ────────────────────────────────────────────────────────
 
 
 def draw_vector_heart(
