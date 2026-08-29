@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 import cv2
 import numpy as np
 
-from camera.cert_manager import ensure_dev_certificate
+from camera.cert_manager import CA_CERT_FILE, ensure_dev_certificate
 
 if TYPE_CHECKING:
     pass
@@ -22,34 +22,51 @@ if TYPE_CHECKING:
 HTML_PATH = Path(__file__).parent / "web" / "phone_camera.html"
 
 
-def get_lan_ip() -> str:
-    """Dynamically determine the host computer's active local network LAN IP."""
-    # Strategy 1: Connect UDP socket to public gateway (determines outbound routing interface)
+def list_network_interfaces() -> tuple[str, list[dict[str, str]]]:
+    """Enumerate all active non-loopback network interfaces and select the primary reachable IP."""
+    primary_ip = None
+    # Strategy 1: probe socket routing table for outbound interface
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.settimeout(0.2)
         s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
+        primary_ip = s.getsockname()[0]
         s.close()
-        if ip and not ip.startswith("127.") and not ip.startswith("169.254."):
-            return ip
     except Exception:
         pass
 
-    # Strategy 2: Probe local hostname addresses prioritizing private LAN subnets
+    # Strategy 2: query system hostname addresses
+    found_ips: list[str] = []
     try:
         hostname = socket.gethostname()
-        candidates = socket.gethostbyname_ex(hostname)[2]
-        for ip in candidates:
-            if ip.startswith("192.168.") or ip.startswith("10."):
-                return ip
-        for ip in candidates:
+        for ip in socket.gethostbyname_ex(hostname)[2]:
             if not ip.startswith("127.") and not ip.startswith("169.254."):
-                return ip
+                found_ips.append(ip)
     except Exception:
         pass
 
-    return "127.0.0.1"
+    if primary_ip and primary_ip not in found_ips and not primary_ip.startswith("127."):
+        found_ips.insert(0, primary_ip)
+
+    selected_ip = primary_ip or (found_ips[0] if found_ips else "127.0.0.1")
+
+    interfaces_info: list[dict[str, str]] = []
+    for ip in found_ips:
+        if ip.startswith("10.") or ip.startswith("192.168.42."):
+            iface_type = "USB Tethering / LAN"
+        elif ip.startswith("192.168."):
+            iface_type = "Wi-Fi / LAN"
+        else:
+            iface_type = "Local Network"
+        interfaces_info.append({"ip": ip, "type": iface_type, "is_primary": str(ip == selected_ip)})
+
+    return selected_ip, interfaces_info
+
+
+def get_lan_ip() -> str:
+    """Return primary active network IP address."""
+    primary, _ = list_network_interfaces()
+    return primary
 
 
 class PhoneStreamServer:
@@ -68,7 +85,7 @@ class PhoneStreamServer:
     def __init__(self, port: int = 8443) -> None:
         self.preferred_port = port
         self.port = port
-        self.lan_ip = get_lan_ip()
+        self.lan_ip, self.interfaces = list_network_interfaces()
         self._server: http.server.ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
         self._running = False
@@ -104,7 +121,7 @@ class PhoneStreamServer:
             if self._running and self._server is not None:
                 return
 
-            self.lan_ip = get_lan_ip()
+            self.lan_ip, self.interfaces = list_network_interfaces()
             cert_file, key_file = ensure_dev_certificate(self.lan_ip)
 
             bound = False
@@ -134,15 +151,18 @@ class PhoneStreamServer:
 
             if print_banner and not self._banner_printed:
                 self._banner_printed = True
-                print("\n" + "=" * 62)
+                iface_desc = self.interfaces[0]["type"] if self.interfaces else "Local Network"
+                print("\n" + "=" * 64)
                 print("  HANDSHOT SECURE HTTPS PHONE CAMERA SERVER ACTIVE")
-                print("=" * 62)
+                print("=" * 64)
                 print(f"  Server Status      : RUNNING (0.0.0.0:{self.port} HTTPS)")
+                print(f"  Network Interface  : {iface_desc} ({self.lan_ip})")
                 print(f"  Webcam Pairing URL : {self.pairing_url}")
                 print(f"  Health Check       : https://{self.lan_ip}:{self.port}/health")
-                print("  Secure Context     : ENABLED (Camera API Unlocked)")
-                print("  Requirement        : Phone & PC must be on SAME Wi-Fi")
-                print("=" * 62 + "\n")
+                print(f"  Diagnostics Page   : https://{self.lan_ip}:{self.port}/diagnostics")
+                print(f"  Download CA Cert   : https://{self.lan_ip}:{self.port}/ca.crt")
+                print("  Firewall Tip       : Allow port 8443 TCP if phone cannot connect")
+                print("=" * 64 + "\n")
 
     def stop(self) -> None:
         """Stop the HTTPS server cleanly."""
@@ -191,7 +211,7 @@ class PhoneStreamServer:
                         self.wfile.write(content)
                     except Exception as e:
                         self.send_error(500, f"Error loading phone camera UI: {e}")
-                elif self.path == "/health":
+                elif self.path in ("/health", "/api/health"):
                     data = json.dumps({
                         "status": "ok",
                         "service": "handshot-phone-camera",
@@ -212,6 +232,39 @@ class PhoneStreamServer:
                     self.send_header("Access-Control-Allow-Origin", "*")
                     self.end_headers()
                     self.wfile.write(data)
+                elif self.path == "/diagnostics":
+                    data = json.dumps({
+                        "service": "handshot-phone-camera",
+                        "status": "RUNNING",
+                        "protocol": "HTTPS",
+                        "listening": f"0.0.0.0:{server_inst.port}",
+                        "detected_ip": server_inst.lan_ip,
+                        "network_interfaces": server_inst.interfaces,
+                        "client_ip": server_inst.client_ip or "None",
+                        "connection": "CONNECTED" if server_inst.is_connected else "WAITING_FOR_PHONE",
+                        "secure_context": True,
+                        "frames_received": server_inst.frames_received,
+                        "fps": round(server_inst.measured_fps, 1),
+                        "facing_mode": server_inst.facing_mode,
+                    }, indent=2).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.end_headers()
+                    self.wfile.write(data)
+                elif self.path in ("/ca.crt", "/handshot-ca.crt"):
+                    if CA_CERT_FILE.exists():
+                        ca_bytes = CA_CERT_FILE.read_bytes()
+                        self.send_response(200)
+                        self.send_header("Content-Type", "application/x-x509-ca-cert")
+                        self.send_header("Content-Disposition", 'attachment; filename="handshot-ca.crt"')
+                        self.send_header("Content-Length", str(len(ca_bytes)))
+                        self.send_header("Access-Control-Allow-Origin", "*")
+                        self.end_headers()
+                        self.wfile.write(ca_bytes)
+                    else:
+                        self.send_error(404, "CA certificate not found")
                 else:
                     self.send_error(404, "Not Found")
 

@@ -34,18 +34,18 @@
       margin-top: 2px;
     }
     .status-ribbon {
-      display: flex;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
       gap: 8px;
       margin-bottom: 12px;
       width: 100%;
       max-width: 480px;
     }
     .ribbon-item {
-      flex: 1;
       background: #121720;
       border: 1px solid #202b3c;
       border-radius: 8px;
-      padding: 6px 8px;
+      padding: 8px;
       font-size: 11px;
       text-align: center;
       color: #94a2b5;
@@ -53,12 +53,12 @@
     .ribbon-item strong {
       display: block;
       color: #f2f5fa;
-      font-size: 12px;
+      font-size: 13px;
       margin-top: 2px;
     }
-    .ribbon-item .tag-ok { color: #5fe8a0; }
-    .ribbon-item .tag-warn { color: #f5b041; }
-    .ribbon-item .tag-err { color: #ff5860; }
+    .tag-ok { color: #5fe8a0 !important; }
+    .tag-warn { color: #f5b041 !important; }
+    .tag-err { color: #ff5860 !important; }
     .video-card {
       width: 100%;
       max-width: 480px;
@@ -137,20 +137,21 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      padding: 24px;
+      padding: 20px;
       text-align: center;
       z-index: 20;
+      overflow-y: auto;
     }
     .error-overlay h3 {
       color: #ff5860;
-      font-size: 17px;
+      font-size: 16px;
       margin-bottom: 8px;
     }
     .error-overlay p {
       color: #94a2b5;
-      font-size: 13px;
+      font-size: 12px;
       line-height: 1.5;
-      margin-bottom: 16px;
+      margin-bottom: 14px;
     }
     .controls {
       width: 100%;
@@ -162,12 +163,12 @@
     }
     .btn-row {
       display: flex;
-      gap: 10px;
+      gap: 8px;
     }
     button {
       flex: 1;
-      padding: 14px 16px;
-      font-size: 14px;
+      padding: 13px 14px;
+      font-size: 13px;
       font-weight: 700;
       border-radius: 12px;
       border: 1px solid #344660;
@@ -177,12 +178,10 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 8px;
+      gap: 6px;
       transition: all 0.15s ease;
     }
-    button:active {
-      transform: scale(0.98);
-    }
+    button:active { transform: scale(0.98); }
     button.primary {
       background: #5ad7ff;
       color: #0a0d12;
@@ -192,6 +191,11 @@
       background: #1c3348;
       border-color: #5ad7ff;
       color: #5ad7ff;
+    }
+    button.outline {
+      background: transparent;
+      border-color: #2a3a52;
+      color: #94a2b5;
     }
     .info-card {
       width: 100%;
@@ -205,8 +209,18 @@
       color: #94a2b5;
       line-height: 1.6;
     }
-    .info-card strong {
-      color: #f2f5fa;
+    .info-card strong { color: #f2f5fa; }
+    .diag-box {
+      font-family: monospace;
+      background: #080b0f;
+      border: 1px solid #1c2636;
+      border-radius: 8px;
+      padding: 10px;
+      font-size: 11px;
+      color: #798da3;
+      margin-top: 8px;
+      white-space: pre-wrap;
+      word-break: break-all;
     }
   </style>
 </head>
@@ -218,26 +232,30 @@
 
   <div class="status-ribbon">
     <div class="ribbon-item">
-      <span>PROTOCOL</span>
-      <strong id="badge-secure" class="tag-ok">HTTPS (Secure)</strong>
+      <span>PROTOCOL / ORIGIN</span>
+      <strong id="badge-secure" class="tag-warn">Checking...</strong>
     </div>
     <div class="ribbon-item">
       <span>CAMERA API</span>
-      <strong id="badge-api" class="tag-ok">Available</strong>
+      <strong id="badge-api" class="tag-warn">Checking...</strong>
     </div>
     <div class="ribbon-item">
-      <span>STATUS</span>
+      <span>SERVER PING</span>
+      <strong id="badge-ping">—</strong>
+    </div>
+    <div class="ribbon-item">
+      <span>CAMERA STATUS</span>
       <strong id="badge-cam-status">Standby</strong>
     </div>
   </div>
 
   <div class="video-card">
     <div id="placeholder" class="placeholder-view">
-      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+      <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
         <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
         <circle cx="12" cy="13" r="4"/>
       </svg>
-      <p>Tap <strong>START CAMERA</strong> to grant camera permission and begin streaming to your computer.</p>
+      <p id="placeholder-msg">Tap <strong>START CAMERA</strong> to grant camera permission and stream to PC.</p>
     </div>
 
     <video id="webcam" playsinline autoplay muted style="display:none;"></video>
@@ -250,8 +268,8 @@
     <div id="fps-counter" class="fps-badge">0 FPS</div>
 
     <div id="error-card" class="error-overlay">
-      <h3 id="err-title">Camera Permission Required</h3>
-      <p id="err-msg">Please tap 'Allow' when your browser asks for camera permission, or check your site settings.</p>
+      <h3 id="err-title">Camera Access Notice</h3>
+      <p id="err-msg">Please follow the instructions below to enable camera access.</p>
       <button id="btn-retry" class="primary" style="padding: 10px 20px;">Try Again</button>
     </div>
   </div>
@@ -259,22 +277,30 @@
   <div class="controls">
     <div class="btn-row">
       <button id="btn-toggle-cam">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 7h-4l-2-3H10L8 7H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V9c0-1.1-.9-2-2-2z"/><circle cx="12" cy="13" r="4"/></svg>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 7h-4l-2-3H10L8 7H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V9c0-1.1-.9-2-2-2z"/><circle cx="12" cy="13" r="4"/></svg>
         <span id="cam-facing-text">Rear Camera</span>
       </button>
       <button id="btn-stream" class="primary">
         <span id="stream-btn-text">START CAMERA</span>
       </button>
     </div>
+    <div class="btn-row">
+      <button id="btn-test-conn" class="outline">🔍 Test Server</button>
+      <button id="btn-test-cam" class="outline">📷 Test Camera</button>
+    </div>
   </div>
 
   <div class="info-card">
-    <strong>First Connection Notice:</strong>
-    <br>If your browser displayed a security notice, tap <em>Advanced / Show Details</em> and select <em>Proceed to Handshot local site</em>.
-    <br><br><strong>Stream Diagnostics:</strong>
-    <br>• Camera: <span id="info-facing" style="color: #5ad7ff;">Rear (Environment)</span>
+    <strong>Android Certificate Trust Guide:</strong>
+    <br>If Chrome blocks camera access due to self-signed TLS:
+    <br>1. Tap <a href="/ca.crt" download="handshot-ca.crt" style="color: #5ad7ff; text-decoration: underline; font-weight: bold;">Download CA Certificate (ca.crt)</a>.
+    <br>2. Open Android <strong>Settings → Security → Install Certificate → CA Certificate</strong> and choose the downloaded file.
+    <br>3. Reload this page → Chrome will grant full Secure Context access!
+    <br><br>
+    <strong>Connection Info:</strong>
+    <br>• Facing: <span id="info-facing" style="color: #5ad7ff;">Rear (Environment)</span>
     <br>• Latency: <span id="latency-val" style="color: #5fe8a0;">~15 ms</span>
-    <br>• Requirement: Phone & PC on <strong>same local Wi-Fi</strong>.
+    <div id="diag-console" class="diag-box">Running initial checks...</div>
   </div>
 
   <canvas id="capture-canvas" style="display:none;"></canvas>
@@ -290,6 +316,7 @@
 
     const video = document.getElementById("webcam");
     const placeholder = document.getElementById("placeholder");
+    const placeholderMsg = document.getElementById("placeholder-msg");
     const canvas = document.getElementById("capture-canvas");
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
     const statusDot = document.getElementById("status-dot");
@@ -305,25 +332,89 @@
     const errTitle = document.getElementById("err-title");
     const errMsg = document.getElementById("err-msg");
     const btnRetry = document.getElementById("btn-retry");
+    const btnTestConn = document.getElementById("btn-test-conn");
+    const btnTestCam = document.getElementById("btn-test-cam");
     const badgeSecure = document.getElementById("badge-secure");
     const badgeApi = document.getElementById("badge-api");
+    const badgePing = document.getElementById("badge-ping");
     const badgeCamStatus = document.getElementById("badge-cam-status");
+    const diagConsole = document.getElementById("diag-console");
 
-    // Check secure context on page load
-    if (window.isSecureContext) {
-      badgeSecure.textContent = "HTTPS (Secure)";
-      badgeSecure.className = "tag-ok";
-    } else {
-      badgeSecure.textContent = "Insecure Context";
-      badgeSecure.className = "tag-err";
+    function logDiag(text) {
+      diagConsole.textContent = text;
     }
 
-    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-      badgeApi.textContent = "Available";
-      badgeApi.className = "tag-ok";
-    } else {
-      badgeApi.textContent = "Unavailable";
-      badgeApi.className = "tag-err";
+    function runInitialDiagnostics() {
+      const isSec = window.isSecureContext;
+      const hasMedia = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+
+      badgeSecure.textContent = isSec ? "Secure Context ✓" : "Insecure Context ✗";
+      badgeSecure.className = isSec ? "tag-ok" : "tag-err";
+
+      badgeApi.textContent = hasMedia ? "Available ✓" : "Unavailable ✗";
+      badgeApi.className = hasMedia ? "tag-ok" : "tag-err";
+
+      const lines = [
+        `URL: ${window.location.href}`,
+        `Protocol: ${window.location.protocol}`,
+        `Secure Context: ${isSec ? "YES" : "NO (Untrusted TLS or HTTP)"}`,
+        `navigator.mediaDevices: ${navigator.mediaDevices ? "Present" : "Undefined"}`,
+        `getUserMedia: ${hasMedia ? "Available" : "Unavailable"}`,
+        `User-Agent: ${navigator.userAgent.split(') ')[0] + ')'}`
+      ];
+      logDiag(lines.join("\n"));
+    }
+
+    async function testConnection() {
+      logDiag("Testing connection to Handshot server...");
+      const start = performance.now();
+      try {
+        const resp = await fetch("/health", { cache: "no-store" });
+        const ping = Math.round(performance.now() - start);
+        if (resp.ok) {
+          const data = await resp.json();
+          badgePing.textContent = `${ping} ms`;
+          badgePing.className = "tag-ok";
+          logDiag(
+            `SERVER REACHABLE (${ping} ms)\n` +
+            `Service: ${data.service}\n` +
+            `Protocol: ${data.protocol}\n` +
+            `Server IP: ${data.lan_ip}:${data.port}\n` +
+            `Client IP: ${data.client_ip || "Detected"}\n` +
+            `Frames Ingested: ${data.frames_received}`
+          );
+        } else {
+          badgePing.textContent = `Err ${resp.status}`;
+          badgePing.className = "tag-err";
+          logDiag(`Server error HTTP ${resp.status}`);
+        }
+      } catch (e) {
+        badgePing.textContent = "Offline";
+        badgePing.className = "tag-err";
+        logDiag(`Connection failed: ${e.message}\nEnsure PC and Phone are connected.`);
+      }
+    }
+
+    async function testCameraAPI() {
+      logDiag("Testing Camera API & Permissions...");
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        showError(
+          "Camera API Unavailable",
+          "Android Chrome restricts camera access when certificates are untrusted.\n\nPlease install the CA certificate (step 1-3 in guide below) or open chrome://flags."
+        );
+        logDiag("Camera API unavailable: navigator.mediaDevices is undefined.");
+        return;
+      }
+
+      try {
+        if (navigator.permissions && navigator.permissions.query) {
+          const p = await navigator.permissions.query({ name: "camera" });
+          logDiag(`Camera Permission State: ${p.state.toUpperCase()}`);
+        }
+        logDiag("Camera API is fully UNLOCKED and ready to stream!");
+      } catch (e) {
+        logDiag(`Camera API accessible. Permission check: ${e.message}`);
+      }
     }
 
     function showError(title, message) {
@@ -332,7 +423,7 @@
       errorCard.style.display = "flex";
       statusDot.className = "dot error";
       statusText.textContent = "Error";
-      badgeCamStatus.textContent = "Error";
+      badgeCamStatus.textContent = "Blocked";
       badgeCamStatus.className = "tag-err";
     }
 
@@ -354,8 +445,8 @@
 
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         showError(
-          "Camera API Unavailable",
-          "Camera API is disabled because the page is not in a secure context. Please make sure you opened the HTTPS link: " + window.location.href
+          "Camera API Blocked",
+          "Android Chrome requires a trusted secure context.\n\nDownload and install the CA certificate (link below), then reload this page."
         );
         return;
       }
@@ -394,19 +485,20 @@
         btnStream.className = "active";
         streamBtnText.textContent = "STOP STREAM";
         statusDot.className = "dot live";
-        statusText.textContent = "Connected & Streaming";
+        statusText.textContent = "Streaming Live";
         badgeCamStatus.textContent = actualFacing;
         badgeCamStatus.className = "tag-ok";
 
+        logDiag(`Camera active: ${actualFacing}\nResolution: ${video.videoWidth}x${video.videoHeight}\nStreaming frames to Handshot...`);
         startFrameLoop();
       } catch (err) {
         console.error("Camera access error:", err);
         if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
-          showError("Camera Permission Denied", "Please allow camera access in your browser or site settings, then tap Try Again.");
+          showError("Permission Denied", "Camera permission was denied. Tap the lock icon in Chrome address bar → Site Settings → Allow Camera.");
         } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
-          showError("No Camera Found", "No working camera hardware was found on this device.");
+          showError("No Camera Found", "No camera device was detected on your phone.");
         } else if (err.name === "NotReadableError") {
-          showError("Camera Busy", "Another application may be using the camera. Please close other camera apps.");
+          showError("Camera Busy", "Another app is currently using the camera. Please close background camera apps.");
         } else {
           showError("Camera Error", err.message || "Failed to initialize video stream.");
         }
@@ -428,6 +520,7 @@
       badgeCamStatus.textContent = "Standby";
       badgeCamStatus.className = "";
       fpsCounter.textContent = "0 FPS";
+      logDiag("Stream stopped. Camera released.");
     }
 
     btnStream.addEventListener("click", () => {
@@ -450,6 +543,9 @@
     btnRetry.addEventListener("click", () => {
       startCamera();
     });
+
+    btnTestConn.addEventListener("click", testConnection);
+    btnTestCam.addEventListener("click", testCameraAPI);
 
     async function sendFrame() {
       if (!isStreaming || inFlight || !video.videoWidth) return;
@@ -485,7 +581,7 @@
             frameCount++;
             if (statusText.textContent === "Reconnecting...") {
               statusDot.className = "dot live";
-              statusText.textContent = "Connected & Streaming";
+              statusText.textContent = "Streaming Live";
             }
           } else {
             consecutiveFailures++;
@@ -517,6 +613,10 @@
       }
       requestAnimationFrame(loop);
     }
+
+    // Run initial checks on load
+    runInitialDiagnostics();
+    testConnection();
   </script>
 </body>
 </html>
