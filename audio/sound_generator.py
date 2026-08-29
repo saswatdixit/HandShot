@@ -376,6 +376,109 @@ def _synth_practice_music(duration: float = 8.0) -> tuple[list[float], list[floa
 
 
 # --------------------------------------------------------------------------
+# Weapon SFX Synthesizers
+# --------------------------------------------------------------------------
+
+
+def _synth_fire_pistol() -> list[float]:
+    """Crisp, punchy pistol gunshot crack with fast transient."""
+    duration = 0.09
+    count = int(SAMPLE_RATE * duration)
+    out = []
+    for i in range(count):
+        t = i / SAMPLE_RATE
+        env = math.exp(-t * 45.0)
+        noise = (math.sin(2.0 * math.pi * 1420.0 * t) + math.sin(2.0 * math.pi * 780.0 * t)) * 0.5
+        body = math.sin(2.0 * math.pi * 220.0 * (1.0 - t / duration) * t) * 0.6
+        out.append((noise * 0.6 + body * 0.4) * env * 0.95)
+    return out
+
+
+def _synth_fire_rifle() -> list[float]:
+    """Tight, rapid assault rifle crack."""
+    duration = 0.07
+    count = int(SAMPLE_RATE * duration)
+    out = []
+    for i in range(count):
+        t = i / SAMPLE_RATE
+        env = math.exp(-t * 55.0)
+        crack = math.sin(2.0 * math.pi * 1800.0 * (1.0 - t * 6.0) * t) * 0.7
+        bass = math.sin(2.0 * math.pi * 320.0 * t) * 0.4
+        out.append((crack + bass) * env * 0.90)
+    return out
+
+
+def _synth_fire_shotgun() -> list[float]:
+    """Heavy low-end pump-shotgun blast with multi-frequency scatter."""
+    duration = 0.18
+    count = int(SAMPLE_RATE * duration)
+    out = []
+    for i in range(count):
+        t = i / SAMPLE_RATE
+        env = math.exp(-t * 18.0)
+        boom = math.sin(2.0 * math.pi * 120.0 * math.exp(-t * 10.0) * t) * 0.75
+        scatter = (math.sin(2.0 * math.pi * 950.0 * t) + math.sin(2.0 * math.pi * 1450.0 * t)) * 0.35
+        out.append((boom + scatter) * env * 0.95)
+    return out
+
+
+def _synth_fire_sniper() -> list[float]:
+    """Heavy supersonic high-caliber sniper discharge with echoing acoustic tail."""
+    duration = 0.28
+    count = int(SAMPLE_RATE * duration)
+    out = []
+    for i in range(count):
+        t = i / SAMPLE_RATE
+        env = math.exp(-t * 9.0)
+        snap = math.sin(2.0 * math.pi * 2400.0 * math.exp(-t * 30.0) * t) * 0.5
+        thump = math.sin(2.0 * math.pi * 95.0 * t) * 0.65
+        tail = math.sin(2.0 * math.pi * 380.0 * t) * 0.25
+        out.append((snap + thump + tail) * env * 0.95)
+    return out
+
+
+def _synth_reload_start() -> list[float]:
+    """Mechanical magazine slide ejection/insertion click."""
+    duration = 0.12
+    count = int(SAMPLE_RATE * duration)
+    out = []
+    for i in range(count):
+        t = i / SAMPLE_RATE
+        env = math.exp(-((t - 0.04) ** 2) * 800.0) if t > 0.02 else math.exp(-t * 40.0)
+        click = math.sin(2.0 * math.pi * 1650.0 * t) * 0.6 + math.sin(2.0 * math.pi * 850.0 * t) * 0.4
+        out.append(click * env * 0.75)
+    return out
+
+
+def _synth_reload_done() -> list[float]:
+    """Satisfying bolt chamber lock click."""
+    duration = 0.14
+    count = int(SAMPLE_RATE * duration)
+    out = []
+    for i in range(count):
+        t = i / SAMPLE_RATE
+        env1 = math.exp(-t * 40.0) * 0.5
+        env2 = math.exp(-max(0.0, t - 0.05) * 50.0) * 0.7 if t >= 0.05 else 0.0
+        click1 = math.sin(2.0 * math.pi * 1200.0 * t) * env1
+        click2 = math.sin(2.0 * math.pi * 2200.0 * t) * env2
+        out.append((click1 + click2) * 0.85)
+    return out
+
+
+def _synth_empty_click() -> list[float]:
+    """Dry metallic trigger pin click when empty."""
+    duration = 0.045
+    count = int(SAMPLE_RATE * duration)
+    out = []
+    for i in range(count):
+        t = i / SAMPLE_RATE
+        env = math.exp(-t * 80.0)
+        click = math.sin(2.0 * math.pi * 2800.0 * t) * 0.7 + math.sin(2.0 * math.pi * 4200.0 * t) * 0.3
+        out.append(click * env * 0.65)
+    return out
+
+
+# --------------------------------------------------------------------------
 # Asset Generation & Verification
 # --------------------------------------------------------------------------
 
@@ -387,6 +490,13 @@ def ensure_audio_assets(sfx_dir: Path = settings.AUDIO_SFX_DIR, music_dir: Path 
 
     sfx_map = {
         "pinch.wav": _synth_pinch,
+        "fire_pistol.wav": _synth_fire_pistol,
+        "fire_rifle.wav": _synth_fire_rifle,
+        "fire_shotgun.wav": _synth_fire_shotgun,
+        "fire_sniper.wav": _synth_fire_sniper,
+        "reload_start.wav": _synth_reload_start,
+        "reload_done.wav": _synth_reload_done,
+        "empty_click.wav": _synth_empty_click,
         "bubble_hit.wav": _synth_bubble_hit,
         "bubble_hit_small.wav": _synth_bubble_hit_small,
         "bubble_hit_large.wav": _synth_bubble_hit_large,

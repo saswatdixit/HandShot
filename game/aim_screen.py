@@ -1,4 +1,4 @@
-"""Pygame Aim Screen with minimalist design, responsive HUD, and local webcam tracking."""
+"""Pygame Aim Screen with minimalist design, modular weapon system, spatial reload zone, and local webcam tracking."""
 
 from __future__ import annotations
 
@@ -32,14 +32,22 @@ from game.ui_renderer import (
     draw_vector_target,
     draw_vector_webcam,
 )
+from game.weapon import (
+    ALL_WEAPONS,
+    ASSAULT_RIFLE_SPEC,
+    PISTOL_SPEC,
+    SHOTGUN_SPEC,
+    SNIPER_SPEC,
+    WeaponSpec,
+    WeaponSystem,
+    WeaponType,
+)
 from gestures import (
-    GestureDetector,
-    GestureResult,
-    GestureSettings,
-    HandGesture,
     PinchDetector,
     PinchPhase,
     PinchResult,
+    ReloadDetector,
+    ReloadResult,
 )
 
 if TYPE_CHECKING:
@@ -71,7 +79,7 @@ class FloatingScore:
 
 
 class AimScreen:
-    """Arcade Handshot Aim Trainer with local webcam tracking and multi-gesture support."""
+    """Arcade Handshot Aim Trainer with local webcam tracking, modular weapons, and spatial reload."""
 
     def __init__(
         self,
@@ -102,23 +110,26 @@ class AimScreen:
                 pre_shot_anchor_seconds=settings.AIM_PRE_SHOT_ANCHOR_SECONDS,
             ),
         )
-        self._gestures = GestureDetector()
+        self._pinch = PinchDetector()
+        self._reload = ReloadDetector()
         self._game = BubbleGame(start_state=GameState.MODE_SELECT)
         self.audio = AudioManager()
         self._particles = ParticleSystem()
-        self._shot: ShotEffect | None = None
+        self._shots: list[ShotEffect] = []
         self._floating_scores: list[FloatingScore] = []
         self._fire_pulse_until = 0.0
+        self._recoil_offset_px = 0.0
         self._life_lost_flash_until = 0.0
+        self._empty_click_until = 0.0
         self._debug_hud = debug_hud
-        self._last_gesture: GestureResult | None = None
+        self._last_pinch: PinchResult | None = None
+        self._last_reload_result: ReloadResult | None = None
         self._last_shot_display_until = 0.0
         self._selected_mode_idx = 0
+        self._selected_weapon_idx = 0
         self._last_countdown_number = 3
         self._audio_notify_until = 0.0
         self._audio_notify_text = ""
-        self._gesture_notify_until = 0.0
-        self._gesture_notify_text = ""
         self._game_over_entered_at = 0.0
 
     def run(self, duration: float = 0.0) -> int:
@@ -151,20 +162,30 @@ class AimScreen:
 
                 # Camera & Hand Tracking Update
                 frame = self.camera.read() if self.camera else None
-                gesture_result: GestureResult | None = None
+                pinch_result: PinchResult | None = None
+                reload_result: ReloadResult | None = None
                 has_hand = False
 
                 if frame is not None and self.tracker is not None:
                     last_result = self.tracker.process(frame, mirrored=self.camera.mirror if self.camera else False)
                     has_hand = (last_result.hand is not None)
-                    gesture_result = self._gestures.update(last_result.hand if has_hand else None, now)
+                    pinch_result = self._pinch.update(last_result.hand if has_hand else None, now)
+                    reload_result = self._reload.update(last_result.hand if has_hand else None, delta_seconds, now)
                 elif self.tracker is not None:
-                    gesture_result = self._gestures.update(None, now)
+                    pinch_result = self._pinch.update(None, now)
+                    reload_result = self._reload.update(None, delta_seconds, now)
 
-                if gesture_result is not None:
-                    self._last_gesture = gesture_result
-                pinch_result = gesture_result.pinch_result if gesture_result is not None else None
+                if pinch_result is not None:
+                    self._last_pinch = pinch_result
+                if reload_result is not None:
+                    self._last_reload_result = reload_result
 
+                # Update weapon reload progress timer
+                reload_done = self._game.weapons.update(delta_seconds, now)
+                if reload_done:
+                    self.audio.play_sfx(self._game.weapons.spec.reload_done_sound)
+
+                # Aim Tracking
                 fingertip = (
                     last_result.hand.index_tip_norm
                     if last_result is not None and last_result.hand is not None
@@ -175,36 +196,25 @@ class AimScreen:
                 # Active Game Updates & Triggers
                 self._update_simulation(delta_seconds, screen, has_hand, now)
 
-                # Handle Shooting Action
-                if gesture_result and gesture_result.shot and self._game.state is GameState.PLAYING:
+                # Spatial Reload Trigger
+                if reload_result and reload_result.reload_triggered and self._game.state is GameState.PLAYING:
+                    self._handle_reload(now)
+
+                # Handle Shooting Action (Pinch Only)
+                if pinch_result and pinch_result.shot and self._game.state is GameState.PLAYING:
                     self._handle_shot(aim_pos, now)
 
-                # Handle Gesture Actions (Pause / Weapon Switch / Reload)
-                if gesture_result:
-                    if gesture_result.pause_toggle:
-                        if self._game.state is GameState.PLAYING:
-                            self._game.toggle_pause()
-                            self.audio.play_sfx("pause")
-                            self._gesture_notify_text = "PAUSED (CLOSED PALM)"
-                            self._gesture_notify_until = now + 1.2
-                        elif self._game.state is GameState.PAUSED:
-                            self._game.toggle_pause()
-                            self.audio.play_sfx("menu_select")
-                            self._gesture_notify_text = "RESUMED (CLOSED PALM)"
-                            self._gesture_notify_until = now + 1.2
-                    elif gesture_result.weapon_switch and self._game.state is GameState.PLAYING:
-                        self._gesture_notify_text = "WEAPON SWITCH (SOON)"
-                        self._gesture_notify_until = now + 0.9
-                    elif gesture_result.reload and self._game.state is GameState.PLAYING:
-                        self._gesture_notify_text = "RELOAD (SOON)"
-                        self._gesture_notify_until = now + 0.9
+                # Recoil decay
+                if self._recoil_offset_px > 0.0:
+                    self._recoil_offset_px = max(0.0, self._recoil_offset_px - delta_seconds * 40.0)
 
                 # Particle System & Floating Scores Update
                 self._particles.update(delta_seconds, now)
                 self._floating_scores = [fs for fs in self._floating_scores if fs.visible(now)]
+                self._shots = [s for s in self._shots if s.visible(now)]
 
                 # Render Complete UI & Game Elements
-                self._draw(screen, last_result, gesture_result, aim_pos, now)
+                self._draw(screen, last_result, pinch_result, reload_result, aim_pos, now)
                 pygame.display.flip()
 
                 if duration and (time.perf_counter() - started) >= duration:
@@ -233,7 +243,15 @@ class AimScreen:
         if event.key in (pygame.K_ESCAPE, pygame.K_q):
             if st is GameState.MODE_SELECT:
                 return False
-            elif st in (GameState.PLAYING, GameState.PAUSED, GameState.GAME_OVER):
+            elif st is GameState.WEAPON_SELECT:
+                self._game.state = GameState.MODE_SELECT
+                self.audio.play_sfx("menu_move")
+                return True
+            elif st is GameState.PLAYING:
+                self._game.toggle_pause()
+                self.audio.play_sfx("pause")
+                return True
+            elif st in (GameState.PAUSED, GameState.GAME_OVER):
                 self._game.state = GameState.MODE_SELECT
                 self._particles.clear()
                 self.audio.stop_music()
@@ -258,7 +276,8 @@ class AimScreen:
             if self.camera:
                 self.camera.toggle_mirror()
                 self._aim.reset()
-                self._gestures.reset()
+                self._pinch.reset()
+                self._reload.reset()
                 if self.tracker:
                     self.tracker.reset()
 
@@ -281,7 +300,40 @@ class AimScreen:
                 self.audio.play_sfx("menu_move")
             elif event.key in (pygame.K_RETURN, pygame.K_SPACE):
                 chosen_mode = ALL_MODES[self._selected_mode_idx]
-                self._game.set_mode(chosen_mode, self.layout.playfield_bounds)
+                self._game.set_mode(chosen_mode, self.layout.playfield_bounds, start_state=GameState.WEAPON_SELECT)
+                self._particles.clear()
+                self.audio.play_sfx("menu_select")
+
+        # Weapon Select Navigation
+        elif st is GameState.WEAPON_SELECT:
+            if event.key == pygame.K_1:
+                self._selected_weapon_idx = 0
+                self.audio.play_sfx("menu_move")
+            elif event.key == pygame.K_2:
+                self._selected_weapon_idx = 1
+                self.audio.play_sfx("menu_move")
+            elif event.key == pygame.K_3:
+                self._selected_weapon_idx = 2
+                self.audio.play_sfx("menu_move")
+            elif event.key == pygame.K_4:
+                self._selected_weapon_idx = 3
+                self.audio.play_sfx("menu_move")
+            elif event.key in (pygame.K_UP, pygame.K_w):
+                self._selected_weapon_idx = (self._selected_weapon_idx - 2) % len(ALL_WEAPONS)
+                self.audio.play_sfx("menu_move")
+            elif event.key in (pygame.K_DOWN, pygame.K_s):
+                self._selected_weapon_idx = (self._selected_weapon_idx + 2) % len(ALL_WEAPONS)
+                self.audio.play_sfx("menu_move")
+            elif event.key in (pygame.K_LEFT, pygame.K_a):
+                self._selected_weapon_idx = (self._selected_weapon_idx - 1) % len(ALL_WEAPONS)
+                self.audio.play_sfx("menu_move")
+            elif event.key in (pygame.K_RIGHT, pygame.K_d):
+                self._selected_weapon_idx = (self._selected_weapon_idx + 1) % len(ALL_WEAPONS)
+                self.audio.play_sfx("menu_move")
+            elif event.key in (pygame.K_RETURN, pygame.K_SPACE):
+                chosen_weapon = ALL_WEAPONS[self._selected_weapon_idx]
+                self._game.weapons.select_weapon(chosen_weapon)
+                self._game.reset(self.layout.playfield_bounds, start_state=GameState.READY, now=now)
                 self._particles.clear()
                 self.audio.play_sfx("menu_select")
 
@@ -291,7 +343,12 @@ class AimScreen:
                 if paused:
                     self.audio.play_sfx("pause")
             elif event.key == pygame.K_r:
-                self._restart_run(now)
+                self._handle_reload(now)
+            elif event.key in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4):
+                idx = event.key - pygame.K_1
+                if 0 <= idx < len(ALL_WEAPONS):
+                    self._game.weapons.select_weapon(ALL_WEAPONS[idx])
+                    self.audio.play_sfx("menu_move")
 
         elif st is GameState.PAUSED:
             if event.key in (pygame.K_p, pygame.K_PAUSE, pygame.K_SPACE):
@@ -308,9 +365,11 @@ class AimScreen:
 
     def _restart_run(self, now: float) -> None:
         self._aim.reset()
-        self._gestures.reset()
+        self._pinch.reset()
+        self._reload.reset()
         self._floating_scores.clear()
         self._particles.clear()
+        self._shots.clear()
         self._game.reset(self.layout.playfield_bounds, start_state=GameState.READY, now=now)
         if self.tracker is not None:
             self.tracker.reset()
@@ -321,7 +380,6 @@ class AimScreen:
 
     def _update_simulation(self, delta_seconds: float, screen: pygame.Surface, has_hand: bool, now: float) -> None:
         prev_state = self._game.state
-        prev_countdown = self._game.countdown_number
 
         escaped = self._game.update(
             delta_seconds,
@@ -357,52 +415,86 @@ class AimScreen:
             else:
                 self.audio.play_sfx("game_over")
 
+    def _handle_reload(self, now: float) -> None:
+        """Centralized reload execution for both spatial hand-down and R key."""
+        weapons = self._game.weapons
+        if weapons.can_reload():
+            started = weapons.start_reload(now)
+            if started:
+                self.audio.play_sfx(weapons.spec.reload_sound)
+        elif weapons.is_empty and weapons.reserve_ammo <= 0:
+            self.audio.play_sfx(weapons.spec.empty_sound)
+
     def _handle_shot(self, aim_pos: tuple[float, float], now: float) -> None:
-        self._last_shot_display_until = now + 0.35
-        self._fire_pulse_until = now + 0.15
-        self._game.stats.record_shot()
+        """Handle weapon discharge on pinch gesture."""
+        weapons = self._game.weapons
+
+        if weapons.is_reloading:
+            return  # Block firing during reload
+
+        if weapons.is_empty:
+            # Trigger click sound and visual empty cue
+            self.audio.play_sfx(weapons.spec.empty_sound)
+            self._empty_click_until = now + 0.50
+            return
+
+        if not weapons.can_fire(now):
+            return
 
         # Retrieve pre-pinch anchor position to cancel mechanical squeeze jerk
-        impact_pos = self._aim.get_anchored_position(now)
+        impact_base = self._aim.get_anchored_position(now)
 
-        hit_bubble = self._game.targets.shoot(impact_pos)
-        if hit_bubble is not None:
-            mult = self._game.combo.register_hit() if self._game.mode.allow_combo else 1
-            pts = hit_bubble.base_score * mult
-            self._game.score.add(pts)
-            is_gold = (hit_bubble.target_type is BubbleType.GOLDEN)
-            self._game.stats.record_hit(is_golden=is_gold)
-            if self._game.combo.current_combo > self._game.stats.highest_combo:
-                self._game.stats.highest_combo = self._game.combo.current_combo
+        impacts = weapons.fire(now, impact_base)
+        if not impacts:
+            return
 
-            if self._game.mode.allow_combo and self._game.combo.current_combo in (3, 5, 10, 15):
-                self.audio.play_sfx("combo_up")
+        self._game.stats.record_shot()
+        self._last_shot_display_until = now + 0.35
+        self._fire_pulse_until = now + settings.CROSSHAIR_FIRE_PULSE_SECONDS
+        self._recoil_offset_px = weapons.spec.recoil_px
+        self.audio.play_sfx(weapons.spec.fire_sound)
 
-            # Spawn bubble burst particles
-            self._particles.emit_target_burst(hit_bubble.position[0], hit_bubble.position[1], hit_bubble.target_type, now)
+        hit_any = False
+        for imp in impacts:
+            hit_bubble = self._game.targets.shoot(imp)
+            if hit_bubble is not None:
+                hit_any = True
+                mult = self._game.combo.register_hit() if self._game.mode.allow_combo else 1
+                pts = hit_bubble.base_score * mult
+                self._game.score.add(pts)
+                is_gold = (hit_bubble.target_type is BubbleType.GOLDEN)
+                self._game.stats.record_hit(is_golden=is_gold)
+                if self._game.combo.current_combo > self._game.stats.highest_combo:
+                    self._game.stats.highest_combo = self._game.combo.current_combo
 
-            # Floating score notification
-            txt = f"+{pts}"
-            if mult > 1:
-                txt += f" ({mult}x)"
-            self._floating_scores.append(
-                FloatingScore(
-                    text=txt,
-                    x=hit_bubble.position[0],
-                    y=hit_bubble.position[1] - 12,
-                    created_at=now,
-                    expires_at=now + 0.8,
-                    color=THEME.ACCENT_GOLD if is_gold else THEME.ACCENT_CYAN,
+                if self._game.mode.allow_combo and self._game.combo.current_combo in (3, 5, 10, 15):
+                    self.audio.play_sfx("combo_streak")
+
+                # Spawn bubble burst particles
+                self._particles.emit_target_burst(hit_bubble.position[0], hit_bubble.position[1], hit_bubble.target_type, now)
+
+                # Floating score notification
+                txt = f"+{pts}"
+                if mult > 1:
+                    txt += f" ({mult}x)"
+                self._floating_scores.append(
+                    FloatingScore(
+                        text=txt,
+                        x=hit_bubble.position[0],
+                        y=hit_bubble.position[1] - 12,
+                        created_at=now,
+                        expires_at=now + 0.8,
+                        color=THEME.ACCENT_GOLD if is_gold else THEME.ACCENT_CYAN,
+                    )
                 )
-            )
 
-            self.audio.play_sfx(hit_bubble.hit_sound_name)
-            self._shot = ShotEffect(position=impact_pos, created_at=now, expires_at=now + 0.2, hit=True)
-        else:
-            if self._game.mode.allow_combo:
-                self._game.combo.register_miss()
-            self.audio.play_sfx("shot_fire")
-            self._shot = ShotEffect(position=impact_pos, created_at=now, expires_at=now + 0.2, hit=False)
+                self.audio.play_sfx(hit_bubble.hit_sound_name)
+                self._shots.append(ShotEffect(position=imp, created_at=now, expires_at=now + settings.SHOT_EFFECT_SECONDS, hit=True))
+            else:
+                self._shots.append(ShotEffect(position=imp, created_at=now, expires_at=now + settings.SHOT_EFFECT_SECONDS, hit=False))
+
+        if not hit_any and self._game.mode.allow_combo:
+            self._game.combo.register_miss()
 
     # -- Rendering Pipeline ------------------------------------------------
 
@@ -436,7 +528,8 @@ class AimScreen:
         self,
         screen: pygame.Surface,
         result: TrackingResult | None,
-        gesture_result: GestureResult | None,
+        pinch_result: PinchResult | None,
+        reload_result: ReloadResult | None,
         aim_pos: tuple[float, float],
         now: float,
     ) -> None:
@@ -450,6 +543,9 @@ class AimScreen:
         l, t, r_bound, b = self.layout.playfield_bounds
         pf_rect = pygame.Rect(round(l), round(t), round(r_bound - l), round(b - t))
         draw_card(screen, pf_rect, (10, 14, 20, 180), THEME.BORDER_SUBTLE, border_radius=12)
+
+        # Draw Subtle Reload Zone Area Indicator
+        self._draw_reload_zone_guide(screen, pf_rect, reload_result, now)
 
         # Render Active Targets & Particles
         if self._game.state in (GameState.PLAYING, GameState.PAUSED, GameState.COUNTDOWN):
@@ -471,13 +567,13 @@ class AimScreen:
                     anchor="center",
                 )
 
-        # Render Shot Trail / Blast Effect
-        if self._shot and self._shot.visible(now):
-            self._draw_shot_effect(screen, self._shot, now)
+        # Render Shot Trails / Pellet Impact Rings
+        for shot in self._shots:
+            self._draw_shot_effect(screen, shot, now)
 
-        # Render Crosshair Reticle
-        pinch_res = gesture_result.pinch_result if gesture_result else None
-        self._draw_crosshair(screen, aim_pos, pinch_res, now)
+        # Render Crosshair Reticle (Weapon-Specific)
+        if self._game.state in (GameState.PLAYING, GameState.COUNTDOWN, GameState.READY):
+            self._draw_crosshair(screen, aim_pos, pinch_result, now)
 
         # Damage Screen Flash
         if now < self._life_lost_flash_until:
@@ -485,14 +581,16 @@ class AimScreen:
             flash_surf.fill((*THEME.ACCENT_CORAL, 40))
             screen.blit(flash_surf, (0, 0))
 
-        # Render Top HUD (isolated non-colliding zones)
+        # Render Top HUD
         has_hand = (result is not None and result.has_hand)
-        if self._game.state is not GameState.MODE_SELECT:
-            self._draw_hud(screen, result, now)
+        if self._game.state not in (GameState.MODE_SELECT, GameState.WEAPON_SELECT):
+            self._draw_hud(screen, result, reload_result, now)
 
         # Render State Screens
         if self._game.state is GameState.MODE_SELECT:
             self._draw_mode_select(screen, w, h)
+        elif self._game.state is GameState.WEAPON_SELECT:
+            self._draw_weapon_select(screen, w, h)
         elif self._game.state is GameState.READY:
             self._draw_ready(screen, has_hand)
         elif self._game.state is GameState.COUNTDOWN:
@@ -508,36 +606,61 @@ class AimScreen:
             draw_card(screen, toast_rect, (20, 28, 42, 220), THEME.BORDER_SUBTLE, border_radius=6)
             self.typo.draw_text(screen, self._audio_notify_text, self.typo.body_bold, THEME.ACCENT_GOLD, toast_rect.center, anchor="center")
 
-        # Gesture action toast notification
-        if now < self._gesture_notify_until:
-            g_toast_rect = pygame.Rect(w // 2 - 130, h - 74, 260, 26)
-            draw_card(screen, g_toast_rect, (16, 24, 38, 220), THEME.BORDER_SUBTLE, border_radius=6)
-            self.typo.draw_text(screen, self._gesture_notify_text, self.typo.body_bold, THEME.ACCENT_CYAN, g_toast_rect.center, anchor="center")
-
         # Bottom Control Strip
-        if self._game.state not in (GameState.MODE_SELECT, GameState.PAUSED):
+        if self._game.state not in (GameState.MODE_SELECT, GameState.WEAPON_SELECT, GameState.PAUSED):
             draw_control_bar(screen, self.layout.control_bar_rect, self.typo, muted=self.audio.muted, debug_on=self._debug_hud)
 
-        # Debug HUD (toggled with D, strictly below top bar)
+        # Debug HUD (toggled with D)
         if self._debug_hud:
-            self._draw_debug_hud(screen, result, gesture_result, now)
+            self._draw_debug_hud(screen, result, pinch_result, reload_result, now)
 
     # -- UI Screens & HUD Layout -------------------------------------------
+
+    def _draw_reload_zone_guide(
+        self,
+        screen: pygame.Surface,
+        pf_rect: pygame.Rect,
+        reload_result: ReloadResult | None,
+        now: float,
+    ) -> None:
+        """Render subtle bottom reload zone indicator."""
+        zone_y = round(pf_rect.top + pf_rect.height * settings.RELOAD_ZONE_TOP)
+        zone_h = pf_rect.bottom - zone_y
+        if zone_h <= 0:
+            return
+
+        in_zone = reload_result is not None and reload_result.in_zone
+        weapons = self._game.weapons
+
+        # Subtle bottom zone tint when relevant
+        if in_zone or weapons.is_empty or weapons.is_reloading:
+            alpha = 35 if in_zone else 15
+            zone_surf = pygame.Surface((pf_rect.width, zone_h), pygame.SRCALPHA)
+            col = (*THEME.ACCENT_CYAN, alpha) if not weapons.is_empty else (*THEME.ACCENT_GOLD, alpha)
+            zone_surf.fill(col)
+            screen.blit(zone_surf, (pf_rect.left, zone_y))
+
+            # Dwell progress line
+            if in_zone and reload_result and reload_result.progress > 0.0:
+                prog_w = round(pf_rect.width * reload_result.progress)
+                pygame.draw.line(screen, THEME.ACCENT_CYAN, (pf_rect.centerx - prog_w // 2, zone_y), (pf_rect.centerx + prog_w // 2, zone_y), 2)
 
     def _draw_hud(
         self,
         screen: pygame.Surface,
         result: TrackingResult | None,
+        reload_result: ReloadResult | None,
         now: float,
     ) -> None:
-        """Render modern top HUD with score, timer, mode, lives, and combo."""
+        """Render modern top HUD with score, timer, mode, weapon ammo, lives, and combo."""
         bar_r = self.layout.top_bar_rect
         draw_card(screen, bar_r, THEME.BG_SURFACE_ELEVATED, THEME.BORDER_SUBTLE, border_radius=10)
 
-        # Zone A: Title & Mode Badge
+        # Zone A: Title & Weapon Badge
         z_a = self.layout.left_zone
         self.typo.draw_text(screen, "HANDSHOT", self.typo.h1, THEME.ACCENT_CYAN, (z_a.left + 14, z_a.centery - 2), anchor="left")
-        self.typo.draw_text(screen, self._game.mode.name.upper(), self.typo.label, THEME.TEXT_MUTED, (z_a.left + 155, z_a.centery + 1), anchor="left")
+        w_name = self._game.weapons.spec.name
+        self.typo.draw_text(screen, w_name, self.typo.label, THEME.TEXT_MUTED, (z_a.left + 155, z_a.centery + 1), anchor="left")
 
         # Zone B: Score
         z_b = self.layout.center_zone
@@ -545,20 +668,32 @@ class AimScreen:
         self.typo.draw_text(screen, "SCORE", self.typo.label, THEME.TEXT_MUTED, (z_b.centerx, z_b.top + 8), anchor="center")
         self.typo.draw_text(screen, score_val, self.typo.score_large, THEME.TEXT_PRIMARY, (z_b.centerx, z_b.bottom - 8), anchor="center")
 
-        # Zone C: Lives & Mode Status
+        # Zone C: Weapon Ammunition & Lives / Timer
         z_c = self.layout.right_zone
-        rem_time = self._game.time_remaining
-        if rem_time is not None:
-            m = int(rem_time) // 60
-            s = int(rem_time) % 60
-            timer_str = f"{m:02d}:{s:02d}"
-            draw_vector_stopwatch(screen, z_c.left + 20, z_c.centery, radius=8, color=THEME.ACCENT_GOLD)
-            self.typo.draw_text(screen, timer_str, self.typo.h1, THEME.ACCENT_GOLD, (z_c.left + 50, z_c.centery), anchor="left")
-        elif self._game.mode.allow_combo and self._game.combo.current_combo > 1:
-            cmb_txt = f"{self._game.combo.current_combo}x"
-            draw_vector_star(screen, z_c.left + 20, z_c.centery, radius=8, color=THEME.ACCENT_CYAN)
-            self.typo.draw_text(screen, cmb_txt, self.typo.h2, THEME.ACCENT_CYAN, (z_c.left + 45, z_c.centery), anchor="left")
+        weapons = self._game.weapons
+        ammo_str = f"{weapons.mag_ammo} / {weapons.reserve_ammo}"
 
+        # Ammo Display
+        if weapons.is_reloading:
+            self.typo.draw_text(screen, "RELOADING...", self.typo.body_bold, THEME.ACCENT_GOLD, (z_c.left + 10, z_c.centery), anchor="left")
+            # Mini reload progress bar
+            bar_w = 60
+            bar_h = 4
+            bar_x = z_c.left + 130
+            bar_y = z_c.centery - 2
+            pygame.draw.rect(screen, (24, 34, 48), (bar_x, bar_y, bar_w, bar_h), border_radius=2)
+            prog_w = round(bar_w * weapons.reload_progress)
+            if prog_w > 0:
+                pygame.draw.rect(screen, THEME.ACCENT_GOLD, (bar_x, bar_y, prog_w, bar_h), border_radius=2)
+        elif weapons.is_empty:
+            blink = int(now * 4) % 2 == 0
+            empty_col = THEME.ACCENT_CORAL if blink else THEME.TEXT_MUTED
+            self.typo.draw_text(screen, "RELOAD", self.typo.body_bold, empty_col, (z_c.left + 10, z_c.centery), anchor="left")
+            self.typo.draw_text(screen, ammo_str, self.typo.label, THEME.TEXT_MUTED, (z_c.left + 90, z_c.centery), anchor="left")
+        else:
+            self.typo.draw_text(screen, ammo_str, self.typo.h2, THEME.TEXT_PRIMARY, (z_c.left + 10, z_c.centery), anchor="left")
+
+        # Rightmost: Lives / Chill indicator
         if self._game.mode.allow_life_loss:
             lx = z_c.right - 18
             for i in range(self._game.mode.initial_lives):
@@ -566,10 +701,10 @@ class AimScreen:
                 draw_vector_heart(screen, lx, z_c.centery, size=16.0, active=active)
                 lx -= 24
         else:
-            self.typo.draw_text(screen, "CHILL MODE", self.typo.label, THEME.ACCENT_EMERALD, (z_c.right - 14, z_c.centery), anchor="right")
+            self.typo.draw_text(screen, "CHILL", self.typo.label, THEME.ACCENT_EMERALD, (z_c.right - 14, z_c.centery), anchor="right")
 
     def _draw_mode_select(self, screen: pygame.Surface, width: int, height: int) -> None:
-        """Render mode selection screen with modern aesthetic cards and gesture guide."""
+        """Render mode selection screen with modern aesthetic cards."""
         overlay = pygame.Surface((width, height), pygame.SRCALPHA)
         overlay.fill((*THEME.BG_DARK, 220))
         screen.blit(overlay, (0, 0))
@@ -622,23 +757,64 @@ class AimScreen:
             if is_sel:
                 draw_keycap(screen, "READY", "", self.typo.label, self.typo.caption, x + card_w - 50, y + card_h // 2, active=True)
 
-        # Compact Gesture Guide
+        # Footer Instruction
         self.typo.draw_text(
             screen,
-            "GESTURES:  Aim (Point)   •   Shoot (Pinch)   •   Pause (Close Palm)   •   Weapon (Two Fingers)   •   Reload (Thumbs Up)",
-            self.typo.caption,
-            THEME.TEXT_MUTED,
-            (width // 2, height - 56),
+            "[ WASD / Arrows ] Choose Mode    [ ENTER / SPACE ] Next: Choose Weapon    [ M ] Mute    [ ESC / Q ] Quit",
+            self.typo.body_small,
+            THEME.TEXT_SECONDARY,
+            (width // 2, height - 32),
             anchor="center",
         )
+
+    def _draw_weapon_select(self, screen: pygame.Surface, width: int, height: int) -> None:
+        """Render dedicated minimalist weapon selection screen."""
+        overlay = pygame.Surface((width, height), pygame.SRCALPHA)
+        overlay.fill((*THEME.BG_DARK, 220))
+        screen.blit(overlay, (0, 0))
+
+        # Title
+        self.typo.draw_text(screen, "HANDSHOT", self.typo.display, THEME.ACCENT_CYAN, (width // 2, 54), anchor="center")
+        self.typo.draw_text(screen, "CHOOSE YOUR WEAPON", self.typo.h2, THEME.TEXT_PRIMARY, (width // 2, 108), anchor="center")
+
+        card_w = min(420, (width - 80) // 2)
+        card_h = min(142, (height - 250) // 2)
+        start_x = (width - (card_w * 2 + 24)) // 2
+        start_y = 140
+
+        for i, w_spec in enumerate(ALL_WEAPONS):
+            row = i // 2
+            col = i % 2
+            x = start_x + col * (card_w + 24)
+            y = start_y + row * (card_h + 16)
+            rect = pygame.Rect(x, y, card_w, card_h)
+
+            is_sel = (i == self._selected_weapon_idx)
+            bg = THEME.BG_SURFACE_HIGHLIGHT if is_sel else THEME.BG_SURFACE
+            border_col = THEME.BORDER_FOCUS if is_sel else THEME.BORDER_SUBTLE
+            b_width = 2 if is_sel else 1
+
+            draw_card(screen, rect, bg, border_col, border_width=b_width, border_radius=12)
+
+            # Number badge cap
+            draw_keycap(screen, str(i + 1), "", self.typo.label, self.typo.caption, x + 32, y + 36, active=is_sel)
+
+            # Text
+            text_x = x + 68
+            self.typo.draw_text(screen, w_spec.name, self.typo.h1, THEME.TEXT_PRIMARY, (text_x, y + 24), anchor="left")
+            self.typo.draw_text(screen, w_spec.tagline, self.typo.body_bold, THEME.ACCENT_CYAN if is_sel else THEME.TEXT_SECONDARY, (text_x, y + 54), anchor="left")
+            self.typo.draw_text(screen, f"MAG: {w_spec.magazine_size}   RESERVE: {w_spec.reserve_ammo}   RELOAD: {w_spec.reload_time_seconds:.1f}s", self.typo.caption, THEME.TEXT_MUTED, (text_x, y + 84), anchor="left")
+
+            if is_sel:
+                draw_keycap(screen, "READY", "", self.typo.label, self.typo.caption, x + card_w - 50, y + card_h // 2, active=True)
 
         # Footer Instruction
         self.typo.draw_text(
             screen,
-            "[ WASD / Arrows ] Choose Mode    [ ENTER / SPACE ] Start Game    [ M ] Mute    [ ESC / Q ] Quit",
+            "[ 1-4 / WASD ] Select Weapon    [ ENTER / SPACE ] Start Run    [ ESC ] Back to Modes",
             self.typo.body_small,
             THEME.TEXT_SECONDARY,
-            (width // 2, height - 28),
+            (width // 2, height - 32),
             anchor="center",
         )
 
@@ -684,7 +860,7 @@ class AimScreen:
         num_str = self._game.countdown_text or "3"
         col = THEME.ACCENT_EMERALD if num_str == "GO!" else THEME.ACCENT_CYAN
         self.typo.draw_text(screen, num_str, self.typo.countdown, col, (width // 2, height // 2 - 20), anchor="center")
-        self.typo.draw_text(screen, "PINCH THUMB + INDEX FINGER TO SHOOT", self.typo.h2, THEME.TEXT_PRIMARY, (width // 2, height // 2 + 75), anchor="center")
+        self.typo.draw_text(screen, "PINCH TO SHOOT   •   MOVE HAND DOWN TO RELOAD", self.typo.h2, THEME.TEXT_PRIMARY, (width // 2, height // 2 + 75), anchor="center")
 
     def _draw_paused(self, screen: pygame.Surface) -> None:
         """Render clean, modern pause overlay card."""
@@ -693,18 +869,13 @@ class AimScreen:
         overlay.fill((*THEME.BG_DARK, 210))
         screen.blit(overlay, (0, 0))
 
-        r = pygame.Rect(w // 2 - 210, h // 2 - 130, 420, 260)
+        r = pygame.Rect(w // 2 - 200, h // 2 - 120, 400, 240)
         draw_card(screen, r, THEME.BG_SURFACE, THEME.BORDER_FOCUS, border_width=2, border_radius=14)
 
-        self.typo.draw_text(screen, "GAME PAUSED", self.typo.h1, THEME.ACCENT_GOLD, (r.centerx, r.top + 32), anchor="center")
-        self.typo.draw_text(screen, "Game is paused", self.typo.body_small, THEME.TEXT_MUTED, (r.centerx, r.top + 62), anchor="center")
-
-        self.typo.draw_text(screen, "[ P / SPACE ] Resume", self.typo.body_bold, THEME.TEXT_PRIMARY, (r.centerx, r.top + 102), anchor="center")
-        self.typo.draw_text(screen, "[ R ] Restart Run", self.typo.body, THEME.TEXT_SECONDARY, (r.centerx, r.top + 136), anchor="center")
-        self.typo.draw_text(screen, "[ ESC / M ] Main Menu", self.typo.body, THEME.TEXT_SECONDARY, (r.centerx, r.top + 170), anchor="center")
-
-        # Gesture hint
-        self.typo.draw_text(screen, "Close palm or press ESC to resume", self.typo.caption, THEME.ACCENT_CYAN, (r.centerx, r.bottom - 22), anchor="center")
+        self.typo.draw_text(screen, "PAUSED", self.typo.h1, THEME.ACCENT_GOLD, (r.centerx, r.top + 36), anchor="center")
+        self.typo.draw_text(screen, "[ ESC / P ] Resume", self.typo.body_bold, THEME.TEXT_PRIMARY, (r.centerx, r.top + 90), anchor="center")
+        self.typo.draw_text(screen, "[ R ] Restart Run", self.typo.body, THEME.TEXT_SECONDARY, (r.centerx, r.top + 128), anchor="center")
+        self.typo.draw_text(screen, "[ M ] Main Menu", self.typo.body, THEME.TEXT_SECONDARY, (r.centerx, r.top + 166), anchor="center")
 
     def _draw_game_over(self, screen: pygame.Surface, now: float) -> None:
         """Render game results card with score breakdown."""
@@ -741,29 +912,62 @@ class AimScreen:
         pinch: PinchResult | None,
         now: float,
     ) -> None:
-        """Render precise vector crosshair reticle."""
+        """Render weapon-specific vector crosshair reticle."""
         x, y = round(pos[0]), round(pos[1])
         is_firing = (now < self._fire_pulse_until)
+        is_empty = (now < self._empty_click_until)
         is_pinched = (pinch and pinch.phase is PinchPhase.PINCHED)
 
-        ret_col = THEME.ACCENT_GOLD if is_firing else (THEME.ACCENT_EMERALD if is_pinched else THEME.ACCENT_CYAN)
-        rad = 18 if is_firing else 14
+        ret_col = THEME.ACCENT_CORAL if is_empty else (THEME.ACCENT_GOLD if is_firing else (THEME.ACCENT_EMERALD if is_pinched else THEME.ACCENT_CYAN))
+        w_type = self._game.weapons.spec.weapon_type
 
-        pygame.draw.circle(screen, (255, 255, 255), (x, y), 2)
-        pygame.draw.circle(screen, ret_col, (x, y), rad, 2)
-        pygame.draw.line(screen, ret_col, (x, y - rad - 8), (x, y - rad - 3), 2)
-        pygame.draw.line(screen, ret_col, (x, y + rad + 3), (x, y + rad + 8), 2)
-        pygame.draw.line(screen, ret_col, (x - rad - 8, y), (x - rad - 3, y), 2)
-        pygame.draw.line(screen, ret_col, (x + rad + 3, y), (x + rad + 8, y), 2)
+        # Pistol: Minimal 4-line precision reticle with center dot
+        if w_type is WeaponType.PISTOL:
+            rad = 14
+            pygame.draw.circle(screen, (255, 255, 255), (x, y), 2)
+            pygame.draw.circle(screen, ret_col, (x, y), rad, 1)
+            pygame.draw.line(screen, ret_col, (x, y - rad - 6), (x, y - rad - 2), 2)
+            pygame.draw.line(screen, ret_col, (x, y + rad + 2), (x, y + rad + 6), 2)
+            pygame.draw.line(screen, ret_col, (x - rad - 6, y), (x - rad - 2, y), 2)
+            pygame.draw.line(screen, ret_col, (x + rad + 2, y), (x + rad + 6, y), 2)
+
+        # Assault Rifle: Dynamic 4-prong reticle expanding on recoil
+        elif w_type is WeaponType.ASSAULT_RIFLE:
+            spread_offset = round(self._recoil_offset_px * 0.8)
+            gap = 6 + spread_offset
+            length = 8
+            pygame.draw.circle(screen, (255, 255, 255), (x, y), 2)
+            pygame.draw.line(screen, ret_col, (x, y - gap - length), (x, y - gap), 2)
+            pygame.draw.line(screen, ret_col, (x, y + gap), (x, y + gap + length), 2)
+            pygame.draw.line(screen, ret_col, (x - gap - length, y), (x - gap, y), 2)
+            pygame.draw.line(screen, ret_col, (x + gap, y), (x + gap + length, y), 2)
+
+        # Shotgun: Wide dispersion circle with 4 radial ticks
+        elif w_type is WeaponType.SHOTGUN:
+            rad = round(self._game.weapons.spec.spread_radius_px)
+            pygame.draw.circle(screen, (255, 255, 255), (x, y), 2)
+            pygame.draw.circle(screen, ret_col, (x, y), rad, 1)
+            pygame.draw.line(screen, ret_col, (x, y - rad - 4), (x, y - rad + 4), 2)
+            pygame.draw.line(screen, ret_col, (x, y + rad - 4), (x, y + rad + 4), 2)
+            pygame.draw.line(screen, ret_col, (x - rad - 4, y), (x - rad + 4, y), 2)
+            pygame.draw.line(screen, ret_col, (x + rad - 4, y), (x + rad + 4, y), 2)
+
+        # Sniper: Fine hairline crosshair with precision circle
+        elif w_type is WeaponType.SNIPER:
+            rad = 18
+            pygame.draw.circle(screen, (255, 255, 255), (x, y), 1)
+            pygame.draw.circle(screen, ret_col, (x, y), rad, 1)
+            pygame.draw.line(screen, ret_col, (x, y - rad - 12), (x, y + rad + 12), 1)
+            pygame.draw.line(screen, ret_col, (x - rad - 12, y), (x + rad + 12, y), 1)
 
     def _draw_shot_effect(self, screen: pygame.Surface, shot: ShotEffect, now: float) -> None:
-        """Render expanding pulse ring on shot fired."""
+        """Render expanding pulse ring on pellet impact."""
         age = now - shot.created_at
         dur = shot.expires_at - shot.created_at
         prog = min(1.0, age / dur)
         alpha = round((1.0 - prog) * 200)
 
-        rad = round(16 + prog * 40)
+        rad = round(10 + prog * 30)
         ring_surf = pygame.Surface((rad * 2 + 4, rad * 2 + 4), pygame.SRCALPHA)
         col = (*THEME.ACCENT_EMERALD, alpha) if shot.hit else (*THEME.ACCENT_CORAL, alpha)
         pygame.draw.circle(ring_surf, col, (rad + 2, rad + 2), rad, 2)
@@ -782,7 +986,8 @@ class AimScreen:
         self,
         screen: pygame.Surface,
         result: TrackingResult | None,
-        gesture_result: GestureResult | None,
+        pinch_result: PinchResult | None,
+        reload_result: ReloadResult | None,
         now: float,
     ) -> None:
         """Render isolated, compact monospaced Debug Panel strictly below top HUD."""
@@ -795,25 +1000,24 @@ class AimScreen:
         else:
             cam_text = "CAM: n/a"
 
-        st = self._game.state
-        if st is GameState.MODE_SELECT:
-            st_text = f"STATE: SELECT ({ALL_MODES[self._selected_mode_idx].name})"
-            st_color = THEME.ACCENT_GOLD
-        elif st is GameState.READY:
-            st_text = f"STATE: READY ({self._game.ready_hand_timer:.2f}s/{settings.READY_HAND_STABLE_SECONDS:.2f}s)"
-            st_color = THEME.ACCENT_GOLD
-        elif st is GameState.COUNTDOWN:
-            st_text = f"STATE: COUNTDOWN ({self._game.countdown_text or '...'})"
-            st_color = THEME.ACCENT_CYAN
-        elif st is GameState.PLAYING:
-            st_text = f"STATE: PLAY ({self._game.mode.name} t={self._game.gameplay_time:.1f}s)"
-            st_color = THEME.ACCENT_EMERALD
-        elif st is GameState.PAUSED:
-            st_text = "STATE: PAUSED"
-            st_color = THEME.ACCENT_GOLD
+        weapons = self._game.weapons
+        w_text = f"WEAPON: {weapons.spec.name} ({weapons.mag_ammo}/{weapons.reserve_ammo})"
+        if weapons.is_reloading:
+            w_state_text = f"WEAPON STATE: RELOADING ({int(weapons.reload_progress * 100)}%)"
+            w_state_col = THEME.ACCENT_GOLD
+        elif weapons.is_empty:
+            w_state_text = "WEAPON STATE: EMPTY"
+            w_state_col = THEME.ACCENT_CORAL
         else:
-            st_text = "STATE: GAME OVER"
-            st_color = THEME.ACCENT_CORAL
+            w_state_text = "WEAPON STATE: READY"
+            w_state_col = THEME.ACCENT_EMERALD
+
+        if reload_result is not None and reload_result.in_zone:
+            rel_zone_text = f"RELOAD ZONE: INSIDE (DWELL: {reload_result.dwell_time:.2f}/{settings.RELOAD_DWELL_SECONDS:.2f}s)"
+            rel_zone_col = THEME.ACCENT_CYAN
+        else:
+            rel_zone_text = "RELOAD ZONE: OUTSIDE"
+            rel_zone_col = THEME.TEXT_MUTED
 
         if self.tracker is None:
             hand_text, hand_color = "HAND: disabled", THEME.TEXT_MUTED
@@ -827,17 +1031,6 @@ class AimScreen:
             hand_color = THEME.ACCENT_GOLD
         else:
             hand_text, hand_color = "HAND: lost", THEME.ACCENT_CORAL
-
-        g_res = gesture_result or self._last_gesture
-        if g_res is not None:
-            g_text = f"GESTURE: {g_res.gesture.name.upper()} ({g_res.confirm_count}/{settings.GESTURE_CONFIRM_FRAMES})"
-            g_color = THEME.ACCENT_EMERALD if g_res.gesture is not HandGesture.NO_HAND else THEME.TEXT_MUTED
-            palm_val = g_res.palm_metric
-            palm_state = "CLOSED" if palm_val and palm_val <= settings.PALM_CLOSE_THRESHOLD else "OPEN"
-            palm_text = f"PALM: {palm_val:.2f} ({palm_state})" if palm_val is not None else "PALM: —"
-        else:
-            g_text, g_color = "GESTURE: —", THEME.TEXT_MUTED
-            palm_text = "PALM: —"
 
         raw_in = self._aim.raw_input
         filt_in = self._aim.filtered_input
@@ -854,7 +1047,7 @@ class AimScreen:
         aim_x, aim_y = round(self._aim.position[0]), round(self._aim.position[1])
         aim_text = f"AIM PIXELS: x={aim_x}, y={aim_y}"
 
-        pinch = g_res.pinch_result if g_res else None
+        pinch = pinch_result or self._last_pinch
         dist_val = pinch.normalized_distance if pinch is not None else None
         if dist_val is not None:
             dist_status = "PINCH" if dist_val <= settings.PINCH_CLOSE_THRESHOLD else ("OPEN" if dist_val >= settings.PINCH_RELEASE_THRESHOLD else "MID")
@@ -867,10 +1060,10 @@ class AimScreen:
         y = r.top + 7
         for line, col in [
             (cam_text, THEME.ACCENT_CYAN),
-            (st_text, st_color),
+            (w_text, THEME.TEXT_PRIMARY),
+            (w_state_text, w_state_col),
+            (rel_zone_text, rel_zone_col),
             (hand_text, hand_color),
-            (g_text, g_color),
-            (palm_text, THEME.ACCENT_GOLD),
             (dist_text, THEME.ACCENT_GOLD),
             (raw_text, THEME.TEXT_SECONDARY),
             (vel_text, THEME.ACCENT_PURPLE),

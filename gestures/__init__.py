@@ -1,18 +1,14 @@
-from gestures.gesture_detector import (
-    GestureDetector,
-    GestureResult,
-    GestureSettings,
-    HandGesture,
-)
+"""Gesture and spatial interaction subsystems for HANDSHOT."""
+
 from gestures.pinch_detector import PinchDetector, PinchPhase, PinchResult, PinchSettings
+from gestures.reload_detector import ReloadDetector, ReloadResult, ReloadSettings
 
 __all__ = [
-    "GestureDetector",
-    "GestureResult",
-    "GestureSettings",
-    "HandGesture",
     "PinchDetector",
     "PinchPhase",
     "PinchResult",
     "PinchSettings",
+    "ReloadDetector",
+    "ReloadResult",
+    "ReloadSettings",
 ]

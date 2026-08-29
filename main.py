@@ -80,7 +80,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         metavar="PATH", help="save one annotated frame and exit")
     parser.add_argument("--debug-gestures", action="store_true",
                         help="open game with live gesture diagnostics HUD enabled")
-    parser.add_argument("--ui-preview", choices=["select", "ready", "countdown", "playing", "paused", "results"],
+    parser.add_argument("--ui-preview", choices=["select", "weapon", "ready", "countdown", "playing", "paused", "results"],
                         default=None, help="directly preview a specific UI screen state")
     parser.add_argument("--duration", type=float, default=0.0, metavar="SECONDS",
                         help="auto-close the preview after N seconds (0 = manual)")
@@ -389,6 +389,7 @@ def run_game(args: argparse.Namespace) -> int:
         if args.ui_preview:
             preview_state_map = {
                 "select": GameState.MODE_SELECT,
+                "weapon": GameState.WEAPON_SELECT,
                 "ready": GameState.READY,
                 "countdown": GameState.COUNTDOWN,
                 "playing": GameState.PLAYING,

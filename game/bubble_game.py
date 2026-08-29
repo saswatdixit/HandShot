@@ -16,17 +16,19 @@ from game.scoring import (
     save_high_score,
 )
 from game.target_manager import TargetManager
+from game.weapon import WeaponSpec, WeaponSystem
 
 
 class GameState(Enum):
     """Core game states across the arcade lifecycle."""
 
-    MODE_SELECT = auto()   # Select between Classic, Chill, Timed, Practice
-    READY = auto()         # Waiting for hand tracking to stabilize
-    COUNTDOWN = auto()     # 3 -> 2 -> 1 -> GO!
-    PLAYING = auto()       # Active gameplay
-    PAUSED = auto()        # Frozen by player (P key)
-    GAME_OVER = auto()     # Results screen / session ended
+    MODE_SELECT = auto()    # Select between Classic, Chill, Timed, Practice
+    WEAPON_SELECT = auto()  # Select weapon (Pistol, AR, Shotgun, Sniper)
+    READY = auto()          # Waiting for hand tracking to stabilize
+    COUNTDOWN = auto()      # 3 -> 2 -> 1 -> GO!
+    PLAYING = auto()        # Active gameplay
+    PAUSED = auto()         # Frozen by player (P / ESC key)
+    GAME_OVER = auto()      # Results screen / session ended
 
 
 class BubbleGame:
@@ -37,9 +39,11 @@ class BubbleGame:
         rng: random.Random | None = None,
         mode: ModeConfig | None = None,
         start_state: GameState = GameState.MODE_SELECT,
+        default_weapon: WeaponSpec | None = None,
     ) -> None:
         self.mode = mode or get_default_mode()
         self.state = start_state
+        self.weapons = WeaponSystem(default_weapon)
         self.score = ScoreTracker()
         self.combo = ComboTracker()
         self.stats = GameStats(lives=self.mode.initial_lives)
@@ -62,13 +66,18 @@ class BubbleGame:
             return max(0.0, self.mode.time_limit_seconds - self.gameplay_time)
         return None
 
-    def set_mode(self, mode: ModeConfig, bounds: Bounds | None = None) -> None:
+    def set_mode(
+        self,
+        mode: ModeConfig,
+        bounds: Bounds | None = None,
+        start_state: GameState = GameState.READY,
+    ) -> None:
         """Switch active game mode and refresh mode settings and targets."""
         self.mode = mode
         self.high_score = load_high_score(mode_name=self.mode.name)
         self.targets.apply_mode(self.mode)
         if bounds is not None:
-            self.reset(bounds, start_state=GameState.READY)
+            self.reset(bounds, start_state=start_state)
 
     def reset(
         self,
@@ -78,6 +87,7 @@ class BubbleGame:
     ) -> None:
         """Completely restart run with fresh lives, stats, score, and targets."""
         self.state = start_state
+        self.weapons.reset_ammo()
         self.score.reset()
         self.combo.reset()
         self.stats.reset(self.mode.initial_lives)
@@ -109,7 +119,7 @@ class BubbleGame:
         now: float = 0.0,
     ) -> list[Bubble]:
         """Update the active state machine and gameplay targets."""
-        if self.state is GameState.MODE_SELECT:
+        if self.state in (GameState.MODE_SELECT, GameState.WEAPON_SELECT):
             return []
 
         if self.state is GameState.READY:

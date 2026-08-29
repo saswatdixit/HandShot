@@ -126,13 +126,13 @@ PINCH_DEBOUNCE_FRAMES = 1
 PINCH_DISTANCE_FILTER_SAMPLES = 1
 
 # --------------------------------------------------------------------------
-# Multi-Gesture System Settings
+# Spatial Reload Zone Settings
 # --------------------------------------------------------------------------
-GESTURE_CONFIRM_FRAMES = 2
-GESTURE_RELEASE_FRAMES = 2
-PALM_CLOSE_THRESHOLD = 0.55
-PALM_OPEN_THRESHOLD = 0.75
-GESTURE_COOLDOWN_SECONDS = 0.35
+# Hand/wrist position near bottom of screen triggers reliable reload
+RELOAD_ZONE_TOP = 0.80
+RELOAD_ZONE_EXIT = 0.70
+RELOAD_DWELL_SECONDS = 0.30
+RELOAD_COOLDOWN_SECONDS = 0.50
 
 # Visual effects durations (clean and brief)
 TRAINING_TARGET_RADIUS = 44
