@@ -708,7 +708,7 @@ class AimScreen:
         self.typo.draw_text(screen, "Phone Camera (QR)", self.typo.h2, THEME.TEXT_PRIMARY, (c1_x + card_w // 2, start_y + 75), anchor="center")
 
         # QR Code Rendering
-        url = self.camera.pairing_url if self.camera and self.camera.pairing_url else "https://127.0.0.1:8443/"
+        url = self.camera.pairing_url if self.camera and self.camera.pairing_url else "http://127.0.0.1:8088/"
         if self._qr_surface is None or self._cached_qr_url != url:
             self._qr_surface = QRCode(url).to_surface(module_size=5, quiet_zone=4, bg_color=(255, 255, 255), fg_color=(0, 0, 0))
             self._cached_qr_url = url

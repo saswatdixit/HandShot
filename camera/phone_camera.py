@@ -12,17 +12,17 @@ from config import settings
 
 
 class PhoneCameraSource(CameraSource):
-    """Encapsulates wireless mobile phone camera streaming over local HTTPS network."""
+    """Encapsulates wireless mobile phone camera streaming over USB/ADB or LAN network."""
 
     def __init__(
         self,
-        port: int = 8443,
+        port: int = 8088,
         mirror: bool = False,
         server: PhoneStreamServer | None = None,
     ) -> None:
         if server is not None:
             self.server = server
-        elif port != 8443:
+        elif port != 8088:
             self.server = PhoneStreamServer(port=port)
         else:
             self.server = PhoneStreamServer.get_instance(port=port)
@@ -41,8 +41,9 @@ class PhoneCameraSource(CameraSource):
 
     @property
     def source_name(self) -> str:
+        mode = "USB/ADB" if self.server.is_adb_mode else "LAN"
         facing = self.server.facing_mode.capitalize()
-        return f"Phone Camera ({facing})"
+        return f"Phone Camera ({mode}, {facing})"
 
     @property
     def pairing_url(self) -> str:
@@ -106,4 +107,5 @@ class PhoneCameraSource(CameraSource):
 
     def describe(self) -> str:
         status = "STREAMING" if self.is_connected else "WAITING"
-        return f"phone {self.server.pairing_url} | {self._width}x{self._height} | {status} | mirror {'on' if self._mirror else 'off'}"
+        mode = "USB/ADB" if self.server.is_adb_mode else "LAN"
+        return f"phone {self.server.pairing_url} ({mode}) | {self._width}x{self._height} | {status} | mirror {'on' if self._mirror else 'off'}"

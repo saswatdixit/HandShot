@@ -463,12 +463,16 @@ class CameraPreviewScreen:
             fps_val = self.camera.phone_server.measured_fps
             stat_txt = f"● PHONE CONNECTED • STREAMING ({fps_val:.0f} FPS) • {facing}"
             stat_col = THEME.ACCENT_EMERALD
+        elif self.camera.phone_server.is_adb_mode:
+            stat_txt = "● USB / ADB REVERSE ACTIVE • Localhost Ready"
+            stat_col = THEME.ACCENT_EMERALD
         else:
-            stat_txt = "● SECURE HTTPS SERVER READY  •  ○ WAITING FOR PHONE"
+            stat_txt = "● SERVER READY  •  ○ WAITING FOR PHONE"
             stat_col = THEME.ACCENT_GOLD
 
         self.typo.draw_text(screen, stat_txt, self.typo.body_bold, stat_col, (r.centerx, url_y + 30), anchor="center")
-        self.typo.draw_text(screen, "First connection: Tap 'Advanced' / 'Show Details' to proceed on phone", self.typo.body_small, THEME.TEXT_MUTED, (r.centerx, url_y + 52), anchor="center")
+        hint = "USB Connection Active" if self.camera.phone_server.is_adb_mode else "Scan with phone on same Wi-Fi / USB network"
+        self.typo.draw_text(screen, hint, self.typo.body_small, THEME.TEXT_MUTED, (r.centerx, url_y + 52), anchor="center")
 
         self.typo.draw_text(
             screen,

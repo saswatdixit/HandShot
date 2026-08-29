@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>HANDSHOT — Secure Mobile Webcam</title>
+  <title>HANDSHOT — Phone Webcam</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -140,7 +140,6 @@
       padding: 20px;
       text-align: center;
       z-index: 20;
-      overflow-y: auto;
     }
     .error-overlay h3 {
       color: #ff5860;
@@ -227,13 +226,13 @@
 <body>
   <header>
     <h1>HANDSHOT</h1>
-    <p class="subtitle">Secure Mobile Webcam</p>
+    <p class="subtitle">Wireless & USB Mobile Webcam</p>
   </header>
 
   <div class="status-ribbon">
     <div class="ribbon-item">
-      <span>PROTOCOL / ORIGIN</span>
-      <strong id="badge-secure" class="tag-warn">Checking...</strong>
+      <span>CONNECTION MODE</span>
+      <strong id="badge-mode" class="tag-warn">Checking...</strong>
     </div>
     <div class="ribbon-item">
       <span>CAMERA API</span>
@@ -244,7 +243,7 @@
       <strong id="badge-ping">—</strong>
     </div>
     <div class="ribbon-item">
-      <span>CAMERA STATUS</span>
+      <span>STREAM STATUS</span>
       <strong id="badge-cam-status">Standby</strong>
     </div>
   </div>
@@ -268,7 +267,7 @@
     <div id="fps-counter" class="fps-badge">0 FPS</div>
 
     <div id="error-card" class="error-overlay">
-      <h3 id="err-title">Camera Access Notice</h3>
+      <h3 id="err-title">Camera Notice</h3>
       <p id="err-msg">Please follow the instructions below to enable camera access.</p>
       <button id="btn-retry" class="primary" style="padding: 10px 20px;">Try Again</button>
     </div>
@@ -291,16 +290,10 @@
   </div>
 
   <div class="info-card">
-    <strong>Android Certificate Trust Guide:</strong>
-    <br>If Chrome blocks camera access due to self-signed TLS:
-    <br>1. Tap <a href="/ca.crt" download="handshot-ca.crt" style="color: #5ad7ff; text-decoration: underline; font-weight: bold;">Download CA Certificate (ca.crt)</a>.
-    <br>2. Open Android <strong>Settings → Security → Install Certificate → CA Certificate</strong> and choose the downloaded file.
-    <br>3. Reload this page → Chrome will grant full Secure Context access!
-    <br><br>
     <strong>Connection Info:</strong>
-    <br>• Facing: <span id="info-facing" style="color: #5ad7ff;">Rear (Environment)</span>
-    <br>• Latency: <span id="latency-val" style="color: #5fe8a0;">~15 ms</span>
-    <div id="diag-console" class="diag-box">Running initial checks...</div>
+    <br>• Camera Facing: <span id="info-facing" style="color: #5ad7ff;">Rear (Environment)</span>
+    <br>• Streaming Latency: <span id="latency-val" style="color: #5fe8a0;">~15 ms</span>
+    <div id="diag-console" class="diag-box">Running diagnostics...</div>
   </div>
 
   <canvas id="capture-canvas" style="display:none;"></canvas>
@@ -316,7 +309,6 @@
 
     const video = document.getElementById("webcam");
     const placeholder = document.getElementById("placeholder");
-    const placeholderMsg = document.getElementById("placeholder-msg");
     const canvas = document.getElementById("capture-canvas");
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
     const statusDot = document.getElementById("status-dot");
@@ -334,7 +326,7 @@
     const btnRetry = document.getElementById("btn-retry");
     const btnTestConn = document.getElementById("btn-test-conn");
     const btnTestCam = document.getElementById("btn-test-cam");
-    const badgeSecure = document.getElementById("badge-secure");
+    const badgeMode = document.getElementById("badge-mode");
     const badgeApi = document.getElementById("badge-api");
     const badgePing = document.getElementById("badge-ping");
     const badgeCamStatus = document.getElementById("badge-cam-status");
@@ -345,21 +337,26 @@
     }
 
     function runInitialDiagnostics() {
-      const isSec = window.isSecureContext;
+      const isLocalhost = (window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost");
+      const isSec = window.isSecureContext || isLocalhost;
       const hasMedia = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
 
-      badgeSecure.textContent = isSec ? "Secure Context ✓" : "Insecure Context ✗";
-      badgeSecure.className = isSec ? "tag-ok" : "tag-err";
+      if (isLocalhost) {
+        badgeMode.textContent = "USB / ADB (Localhost)";
+        badgeMode.className = "tag-ok";
+      } else {
+        badgeMode.textContent = `LAN (${window.location.hostname})`;
+        badgeMode.className = "tag-ok";
+      }
 
       badgeApi.textContent = hasMedia ? "Available ✓" : "Unavailable ✗";
       badgeApi.className = hasMedia ? "tag-ok" : "tag-err";
 
       const lines = [
         `URL: ${window.location.href}`,
-        `Protocol: ${window.location.protocol}`,
-        `Secure Context: ${isSec ? "YES" : "NO (Untrusted TLS or HTTP)"}`,
-        `navigator.mediaDevices: ${navigator.mediaDevices ? "Present" : "Undefined"}`,
-        `getUserMedia: ${hasMedia ? "Available" : "Unavailable"}`,
+        `Mode: ${isLocalhost ? "USB ADB Reverse (Natively Secure)" : "LAN / Wi-Fi Origin"}`,
+        `Secure Context: ${isSec ? "YES (Native Localhost / Secure Origin)" : "NO"}`,
+        `Camera API: ${hasMedia ? "Available" : "Unavailable"}`,
         `User-Agent: ${navigator.userAgent.split(') ')[0] + ')'}`
       ];
       logDiag(lines.join("\n"));
@@ -378,9 +375,8 @@
           logDiag(
             `SERVER REACHABLE (${ping} ms)\n` +
             `Service: ${data.service}\n` +
-            `Protocol: ${data.protocol}\n` +
+            `Mode: ${data.connection_mode.toUpperCase()}\n` +
             `Server IP: ${data.lan_ip}:${data.port}\n` +
-            `Client IP: ${data.client_ip || "Detected"}\n` +
             `Frames Ingested: ${data.frames_received}`
           );
         } else {
@@ -391,7 +387,7 @@
       } catch (e) {
         badgePing.textContent = "Offline";
         badgePing.className = "tag-err";
-        logDiag(`Connection failed: ${e.message}\nEnsure PC and Phone are connected.`);
+        logDiag(`Connection failed: ${e.message}\nCheck USB connection or Wi-Fi network.`);
       }
     }
 
@@ -400,7 +396,7 @@
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         showError(
           "Camera API Unavailable",
-          "Android Chrome restricts camera access when certificates are untrusted.\n\nPlease install the CA certificate (step 1-3 in guide below) or open chrome://flags."
+          "If on LAN HTTP, connect via USB and use 'adb reverse tcp:8088 tcp:8088' to unlock localhost camera access."
         );
         logDiag("Camera API unavailable: navigator.mediaDevices is undefined.");
         return;
@@ -413,7 +409,7 @@
         }
         logDiag("Camera API is fully UNLOCKED and ready to stream!");
       } catch (e) {
-        logDiag(`Camera API accessible. Permission check: ${e.message}`);
+        logDiag(`Camera API accessible. Status: ${e.message}`);
       }
     }
 
@@ -446,7 +442,7 @@
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         showError(
           "Camera API Blocked",
-          "Android Chrome requires a trusted secure context.\n\nDownload and install the CA certificate (link below), then reload this page."
+          "Connect via USB cable and open http://127.0.0.1:8088/ for native localhost camera access."
         );
         return;
       }

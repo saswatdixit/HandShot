@@ -1,11 +1,10 @@
-"""High-performance, low-latency LAN HTTPS phone streaming server for HANDSHOT (Phase 13)."""
+"""High-performance, low-latency LAN & ADB USB phone streaming server for HANDSHOT (Phase 13)."""
 
 from __future__ import annotations
 
 import http.server
 import json
 import socket
-import ssl
 import threading
 import time
 from pathlib import Path
@@ -14,7 +13,7 @@ from typing import TYPE_CHECKING
 import cv2
 import numpy as np
 
-from camera.cert_manager import CA_CERT_FILE, ensure_dev_certificate
+from camera.adb_manager import ADBManager
 
 if TYPE_CHECKING:
     pass
@@ -25,7 +24,6 @@ HTML_PATH = Path(__file__).parent / "web" / "phone_camera.html"
 def list_network_interfaces() -> tuple[str, list[dict[str, str]]]:
     """Enumerate all active non-loopback network interfaces and select the primary reachable IP."""
     primary_ip = None
-    # Strategy 1: probe socket routing table for outbound interface
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.settimeout(0.2)
@@ -35,7 +33,6 @@ def list_network_interfaces() -> tuple[str, list[dict[str, str]]]:
     except Exception:
         pass
 
-    # Strategy 2: query system hostname addresses
     found_ips: list[str] = []
     try:
         hostname = socket.gethostname()
@@ -70,22 +67,23 @@ def get_lan_ip() -> str:
 
 
 class PhoneStreamServer:
-    """Manages local HTTPS web app serving and real-time mobile frame ingestion."""
+    """Manages local HTTP web app serving and real-time mobile frame ingestion via USB/ADB or LAN."""
 
     _instance: PhoneStreamServer | None = None
     _instance_lock = threading.Lock()
 
     @classmethod
-    def get_instance(cls, port: int = 8443) -> PhoneStreamServer:
+    def get_instance(cls, port: int = 8088) -> PhoneStreamServer:
         with cls._instance_lock:
             if cls._instance is None:
                 cls._instance = PhoneStreamServer(port=port)
             return cls._instance
 
-    def __init__(self, port: int = 8443) -> None:
+    def __init__(self, port: int = 8088) -> None:
         self.preferred_port = port
         self.port = port
         self.lan_ip, self.interfaces = list_network_interfaces()
+        self.adb = ADBManager(port=port)
         self._server: http.server.ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
         self._running = False
@@ -108,32 +106,38 @@ class PhoneStreamServer:
         return self._running and self._server is not None
 
     @property
+    def is_adb_mode(self) -> bool:
+        return self.adb.reverse_active
+
+    @property
     def pairing_url(self) -> str:
-        return f"https://{self.lan_ip}:{self.port}/"
+        """Return pairing URL: http://127.0.0.1:<port>/ if ADB reverse is active, else http://<LAN_IP>:<port>/"""
+        if self.adb.reverse_active:
+            return f"http://127.0.0.1:{self.port}/"
+        return f"http://{self.lan_ip}:{self.port}/"
 
     @property
     def is_connected(self) -> bool:
         return (time.perf_counter() - self.last_frame_time) < 3.0
 
+    def refresh_adb(self) -> bool:
+        """Probe and configure ADB reverse port mapping."""
+        return self.adb.setup_reverse()
+
     def start(self, print_banner: bool = True) -> None:
-        """Start the HTTPS server on 0.0.0.0 if not already running."""
+        """Start the HTTP server on 0.0.0.0 and establish ADB reverse if device is present."""
         with self._lock:
             if self._running and self._server is not None:
                 return
 
             self.lan_ip, self.interfaces = list_network_interfaces()
-            cert_file, key_file = ensure_dev_certificate(self.lan_ip)
-
             bound = False
             for p in range(self.preferred_port, self.preferred_port + 20):
                 try:
                     server = http.server.ThreadingHTTPServer(("0.0.0.0", p), self._make_handler())
-                    ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-                    ssl_ctx.load_cert_chain(certfile=str(cert_file), keyfile=str(key_file))
-                    server.socket = ssl_ctx.wrap_socket(server.socket, server_side=True)
-
                     self.port = p
                     self._server = server
+                    self.adb.port = p
                     bound = True
                     break
                 except OSError:
@@ -141,33 +145,34 @@ class PhoneStreamServer:
 
             if not bound or self._server is None:
                 raise RuntimeError(
-                    f"Could not bind secure phone streaming server to ports {self.preferred_port}..{self.preferred_port+20}. "
-                    f"Check that no other application is blocking port {self.preferred_port}."
+                    f"Could not bind phone streaming server to ports {self.preferred_port}..{self.preferred_port+20}."
                 )
 
             self._running = True
-            self._thread = threading.Thread(target=self._server.serve_forever, daemon=True, name="PhoneStreamHTTPSServer")
+            self._thread = threading.Thread(target=self._server.serve_forever, daemon=True, name="PhoneStreamHTTPServer")
             self._thread.start()
+
+            # Attempt ADB reverse port mapping
+            self.adb.setup_reverse()
 
             if print_banner and not self._banner_printed:
                 self._banner_printed = True
-                iface_desc = self.interfaces[0]["type"] if self.interfaces else "Local Network"
+                conn_desc = "USB / ADB REVERSE (Native Secure Context)" if self.adb.reverse_active else f"Wi-Fi / LAN ({self.lan_ip})"
                 print("\n" + "=" * 64)
-                print("  HANDSHOT SECURE HTTPS PHONE CAMERA SERVER ACTIVE")
+                print("  HANDSHOT PHONE CAMERA SERVER ACTIVE")
                 print("=" * 64)
-                print(f"  Server Status      : RUNNING (0.0.0.0:{self.port} HTTPS)")
-                print(f"  Network Interface  : {iface_desc} ({self.lan_ip})")
+                print(f"  Server Status      : RUNNING (0.0.0.0:{self.port})")
+                print(f"  Connection Mode    : {conn_desc}")
                 print(f"  Webcam Pairing URL : {self.pairing_url}")
-                print(f"  Health Check       : https://{self.lan_ip}:{self.port}/health")
-                print(f"  Diagnostics Page   : https://{self.lan_ip}:{self.port}/diagnostics")
-                print(f"  Download CA Cert   : https://{self.lan_ip}:{self.port}/ca.crt")
-                print("  Firewall Tip       : Allow port 8443 TCP if phone cannot connect")
+                print(f"  Health Check       : http://{self.lan_ip}:{self.port}/health")
+                print(f"  Diagnostics Page   : http://{self.lan_ip}:{self.port}/diagnostics")
                 print("=" * 64 + "\n")
 
     def stop(self) -> None:
-        """Stop the HTTPS server cleanly."""
+        """Stop the HTTP server and clean up ADB reverse mappings cleanly."""
         with self._lock:
             self._running = False
+            self.adb.remove_reverse()
             if self._server is not None:
                 try:
                     self._server.shutdown()
@@ -215,10 +220,13 @@ class PhoneStreamServer:
                     data = json.dumps({
                         "status": "ok",
                         "service": "handshot-phone-camera",
-                        "protocol": "https",
+                        "protocol": "http",
                         "lan_ip": server_inst.lan_ip,
                         "port": server_inst.port,
                         "listening_on": f"0.0.0.0:{server_inst.port}",
+                        "pairing_url": server_inst.pairing_url,
+                        "connection_mode": "usb_adb" if server_inst.adb.reverse_active else "lan_wifi",
+                        "adb_status": server_inst.adb.get_status(),
                         "secure_context": True,
                         "connected": server_inst.is_connected,
                         "fps": round(server_inst.measured_fps, 1),
@@ -236,13 +244,16 @@ class PhoneStreamServer:
                     data = json.dumps({
                         "service": "handshot-phone-camera",
                         "status": "RUNNING",
-                        "protocol": "HTTPS",
+                        "protocol": "HTTP",
                         "listening": f"0.0.0.0:{server_inst.port}",
+                        "pairing_url": server_inst.pairing_url,
+                        "connection_mode": "USB_ADB" if server_inst.adb.reverse_active else "LAN_WIFI",
+                        "adb": server_inst.adb.get_status(),
                         "detected_ip": server_inst.lan_ip,
                         "network_interfaces": server_inst.interfaces,
                         "client_ip": server_inst.client_ip or "None",
                         "connection": "CONNECTED" if server_inst.is_connected else "WAITING_FOR_PHONE",
-                        "secure_context": True,
+                        "secure_context": "NATIVE_LOCALHOST" if server_inst.adb.reverse_active else "LAN_ORIGIN",
                         "frames_received": server_inst.frames_received,
                         "fps": round(server_inst.measured_fps, 1),
                         "facing_mode": server_inst.facing_mode,
@@ -253,18 +264,6 @@ class PhoneStreamServer:
                     self.send_header("Access-Control-Allow-Origin", "*")
                     self.end_headers()
                     self.wfile.write(data)
-                elif self.path in ("/ca.crt", "/handshot-ca.crt"):
-                    if CA_CERT_FILE.exists():
-                        ca_bytes = CA_CERT_FILE.read_bytes()
-                        self.send_response(200)
-                        self.send_header("Content-Type", "application/x-x509-ca-cert")
-                        self.send_header("Content-Disposition", 'attachment; filename="handshot-ca.crt"')
-                        self.send_header("Content-Length", str(len(ca_bytes)))
-                        self.send_header("Access-Control-Allow-Origin", "*")
-                        self.end_headers()
-                        self.wfile.write(ca_bytes)
-                    else:
-                        self.send_error(404, "CA certificate not found")
                 else:
                     self.send_error(404, "Not Found")
 

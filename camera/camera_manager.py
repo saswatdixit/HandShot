@@ -41,7 +41,7 @@ class CameraManager:
         self._req_mirror = mirror
         self._backend = backend
         self.threaded = threaded
-        self._phone_server = PhoneStreamServer.get_instance(port=8443)
+        self._phone_server = PhoneStreamServer.get_instance(port=8088)
         self.ensure_phone_server_started()
 
         if source is not None:
@@ -179,8 +179,8 @@ class CameraManager:
         )
         self._source.open()
 
-    def use_phone_camera(self, port: int = 8443) -> None:
-        """Switch to a wireless mobile phone camera stream over secure HTTPS."""
+    def use_phone_camera(self, port: int = 8088) -> None:
+        """Switch to a mobile phone camera stream over USB/ADB or LAN network."""
         if isinstance(self._source, PhoneCameraSource):
             return
         old_mirror = self._source.mirror
