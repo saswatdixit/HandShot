@@ -1,0 +1,7 @@
+# HANDSHOT dependencies
+# Phase 1 (camera), Phase 2 (hand tracking), and Phase 3 (aim screen).
+
+opencv-python>=4.8
+mediapipe>=1.0
+numpy>=1.26
+pygame>=2.5
