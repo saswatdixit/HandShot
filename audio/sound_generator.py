@@ -376,105 +376,106 @@ def _synth_practice_music(duration: float = 8.0) -> tuple[list[float], list[floa
 
 
 # --------------------------------------------------------------------------
-# Weapon SFX Synthesizers
+# Weapon SFX Synthesizers (Polished Target-Range Arcade Aesthetic)
 # --------------------------------------------------------------------------
 
 
 def _synth_fire_pistol() -> list[float]:
-    """Crisp, punchy pistol gunshot crack with fast transient."""
-    duration = 0.09
+    """Sharp, light, precision pistol crack with fast transient."""
+    duration = 0.08
     count = int(SAMPLE_RATE * duration)
     out = []
     for i in range(count):
         t = i / SAMPLE_RATE
-        env = math.exp(-t * 45.0)
-        noise = (math.sin(2.0 * math.pi * 1420.0 * t) + math.sin(2.0 * math.pi * 780.0 * t)) * 0.5
-        body = math.sin(2.0 * math.pi * 220.0 * (1.0 - t / duration) * t) * 0.6
-        out.append((noise * 0.6 + body * 0.4) * env * 0.95)
+        env = math.exp(-t * 52.0)
+        snap = math.sin(2.0 * math.pi * 1650.0 * (1.0 - t * 4.0) * t) * 0.65
+        body = math.sin(2.0 * math.pi * 310.0 * t) * 0.45
+        out.append((snap + body) * env * 0.90)
     return out
 
 
 def _synth_fire_rifle() -> list[float]:
-    """Tight, rapid assault rifle crack."""
-    duration = 0.07
+    """Tight, snappy, rapid assault rifle crack for fast-paced firing."""
+    duration = 0.065
     count = int(SAMPLE_RATE * duration)
     out = []
     for i in range(count):
         t = i / SAMPLE_RATE
-        env = math.exp(-t * 55.0)
-        crack = math.sin(2.0 * math.pi * 1800.0 * (1.0 - t * 6.0) * t) * 0.7
-        bass = math.sin(2.0 * math.pi * 320.0 * t) * 0.4
-        out.append((crack + bass) * env * 0.90)
+        env = math.exp(-t * 62.0)
+        crack = math.sin(2.0 * math.pi * 2100.0 * (1.0 - t * 5.0) * t) * 0.70
+        thump = math.sin(2.0 * math.pi * 420.0 * t) * 0.40
+        out.append((crack + thump) * env * 0.90)
     return out
 
 
 def _synth_fire_shotgun() -> list[float]:
-    """Heavy low-end pump-shotgun blast with multi-frequency scatter."""
-    duration = 0.18
+    """Heavy pump-shotgun blast: deep sub-bass thump + multi-frequency pellet scatter."""
+    duration = 0.19
     count = int(SAMPLE_RATE * duration)
     out = []
     for i in range(count):
         t = i / SAMPLE_RATE
-        env = math.exp(-t * 18.0)
-        boom = math.sin(2.0 * math.pi * 120.0 * math.exp(-t * 10.0) * t) * 0.75
-        scatter = (math.sin(2.0 * math.pi * 950.0 * t) + math.sin(2.0 * math.pi * 1450.0 * t)) * 0.35
-        out.append((boom + scatter) * env * 0.95)
+        env = math.exp(-t * 19.0)
+        boom = math.sin(2.0 * math.pi * 110.0 * math.exp(-t * 8.0) * t) * 0.75
+        scatter1 = math.sin(2.0 * math.pi * 920.0 * t) * 0.25
+        scatter2 = math.sin(2.0 * math.pi * 1480.0 * t) * 0.20
+        out.append((boom + scatter1 + scatter2) * env * 0.95)
     return out
 
 
 def _synth_fire_sniper() -> list[float]:
-    """Heavy supersonic high-caliber sniper discharge with echoing acoustic tail."""
-    duration = 0.28
+    """Heavy supersonic high-caliber sniper discharge with resounding acoustic boom."""
+    duration = 0.29
     count = int(SAMPLE_RATE * duration)
     out = []
     for i in range(count):
         t = i / SAMPLE_RATE
-        env = math.exp(-t * 9.0)
-        snap = math.sin(2.0 * math.pi * 2400.0 * math.exp(-t * 30.0) * t) * 0.5
-        thump = math.sin(2.0 * math.pi * 95.0 * t) * 0.65
-        tail = math.sin(2.0 * math.pi * 380.0 * t) * 0.25
-        out.append((snap + thump + tail) * env * 0.95)
+        env = math.exp(-t * 8.5)
+        snap = math.sin(2.0 * math.pi * 2600.0 * math.exp(-t * 32.0) * t) * 0.55
+        thump = math.sin(2.0 * math.pi * 85.0 * t) * 0.70
+        sub_tail = math.sin(2.0 * math.pi * 190.0 * t) * 0.25
+        out.append((snap + thump + sub_tail) * env * 0.95)
     return out
 
 
 def _synth_reload_start() -> list[float]:
-    """Mechanical magazine slide ejection/insertion click."""
+    """Dual mechanical magazine slide ejection/insertion click."""
     duration = 0.12
     count = int(SAMPLE_RATE * duration)
     out = []
     for i in range(count):
         t = i / SAMPLE_RATE
-        env = math.exp(-((t - 0.04) ** 2) * 800.0) if t > 0.02 else math.exp(-t * 40.0)
-        click = math.sin(2.0 * math.pi * 1650.0 * t) * 0.6 + math.sin(2.0 * math.pi * 850.0 * t) * 0.4
+        env = math.exp(-((t - 0.04) ** 2) * 900.0) if t > 0.02 else math.exp(-t * 45.0)
+        click = math.sin(2.0 * math.pi * 1750.0 * t) * 0.6 + math.sin(2.0 * math.pi * 880.0 * t) * 0.4
         out.append(click * env * 0.75)
     return out
 
 
 def _synth_reload_done() -> list[float]:
-    """Satisfying bolt chamber lock click."""
-    duration = 0.14
+    """Crisp, satisfying bolt chamber lock snap."""
+    duration = 0.13
     count = int(SAMPLE_RATE * duration)
     out = []
     for i in range(count):
         t = i / SAMPLE_RATE
-        env1 = math.exp(-t * 40.0) * 0.5
-        env2 = math.exp(-max(0.0, t - 0.05) * 50.0) * 0.7 if t >= 0.05 else 0.0
-        click1 = math.sin(2.0 * math.pi * 1200.0 * t) * env1
-        click2 = math.sin(2.0 * math.pi * 2200.0 * t) * env2
+        env1 = math.exp(-t * 45.0) * 0.5
+        env2 = math.exp(-max(0.0, t - 0.04) * 55.0) * 0.75 if t >= 0.04 else 0.0
+        click1 = math.sin(2.0 * math.pi * 1350.0 * t) * env1
+        click2 = math.sin(2.0 * math.pi * 2400.0 * t) * env2
         out.append((click1 + click2) * 0.85)
     return out
 
 
 def _synth_empty_click() -> list[float]:
-    """Dry metallic trigger pin click when empty."""
+    """Dry metallic trigger hammer click when magazine is empty."""
     duration = 0.045
     count = int(SAMPLE_RATE * duration)
     out = []
     for i in range(count):
         t = i / SAMPLE_RATE
-        env = math.exp(-t * 80.0)
-        click = math.sin(2.0 * math.pi * 2800.0 * t) * 0.7 + math.sin(2.0 * math.pi * 4200.0 * t) * 0.3
-        out.append(click * env * 0.65)
+        env = math.exp(-t * 85.0)
+        click = math.sin(2.0 * math.pi * 3100.0 * t) * 0.7 + math.sin(2.0 * math.pi * 4600.0 * t) * 0.3
+        out.append(click * env * 0.70)
     return out
 
 

@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING
 
 import pygame
 
+from game.crosshair_renderer import CrosshairState, draw_crosshair
+
 from aim.aim_controller import AimController, AimSettings
 from audio.audio_manager import AudioManager
 from camera.camera_manager import CameraManager
@@ -581,6 +583,14 @@ class AimScreen:
             flash_surf.fill((*THEME.ACCENT_CORAL, 40))
             screen.blit(flash_surf, (0, 0))
 
+        # Empty Magazine Cue
+        weapons = self._game.weapons
+        if weapons.is_empty and not weapons.is_reloading and self._game.state is GameState.PLAYING:
+            msg_rect = pygame.Rect(w // 2 - 100, h - 110, 200, 42)
+            draw_card(screen, msg_rect, (24, 16, 20, 210), THEME.BORDER_SUBTLE, border_radius=8)
+            self.typo.draw_text(screen, "RELOAD", self.typo.body_bold, THEME.ACCENT_CORAL, (msg_rect.centerx, msg_rect.top + 12), anchor="center")
+            self.typo.draw_text(screen, "move hand down", self.typo.caption, THEME.TEXT_MUTED, (msg_rect.centerx, msg_rect.bottom - 10), anchor="center")
+
         # Render Top HUD
         has_hand = (result is not None and result.has_hand)
         if self._game.state not in (GameState.MODE_SELECT, GameState.WEAPON_SELECT):
@@ -878,7 +888,7 @@ class AimScreen:
         self.typo.draw_text(screen, "[ M ] Main Menu", self.typo.body, THEME.TEXT_SECONDARY, (r.centerx, r.top + 166), anchor="center")
 
     def _draw_game_over(self, screen: pygame.Surface, now: float) -> None:
-        """Render game results card with score breakdown."""
+        """Render clean run results card including weapon summary."""
         w, h = screen.get_size()
         overlay = pygame.Surface((w, h), pygame.SRCALPHA)
         overlay.fill((*THEME.BG_DARK, 220))
@@ -887,23 +897,28 @@ class AimScreen:
         r = self.layout.results_card_rect
         draw_card(screen, r, THEME.BG_SURFACE, THEME.BORDER_FOCUS, border_width=2, border_radius=14)
 
-        title = "NEW HIGH SCORE!" if self._game.is_new_high_score else "ROUND OVER"
-        title_col = THEME.ACCENT_GOLD if self._game.is_new_high_score else THEME.ACCENT_CORAL
-        self.typo.draw_text(screen, title, self.typo.h1, title_col, (r.centerx, r.top + 34), anchor="center")
+        title = "NEW HIGH SCORE!" if self._game.is_new_high_score else "RUN COMPLETE"
+        title_col = THEME.ACCENT_GOLD if self._game.is_new_high_score else THEME.ACCENT_CYAN
+        self.typo.draw_text(screen, title, self.typo.h1, title_col, (r.centerx, r.top + 32), anchor="center")
 
         score_txt = f"{self._game.score.score:,}"
-        self.typo.draw_text(screen, score_txt, self.typo.display, THEME.TEXT_PRIMARY, (r.centerx, r.top + 80), anchor="center")
+        self.typo.draw_text(screen, score_txt, self.typo.display, THEME.TEXT_PRIMARY, (r.centerx, r.top + 78), anchor="center")
+
+        # Weapon used badge
+        w_name = self._game.weapons.spec.name
+        self.typo.draw_text(screen, w_name, self.typo.h2, THEME.ACCENT_CYAN, (r.centerx, r.top + 124), anchor="center")
 
         # Stats summary row
         acc = f"{self._game.stats.accuracy:.1f}%"
         hits = f"{self._game.stats.targets_hit}"
+        shots = f"{self._game.stats.shots_fired}"
         time_s = f"{self._game.gameplay_time:.1f}s"
 
-        stats_y = r.top + 130
-        self.typo.draw_text(screen, f"HITS: {hits}   •   ACCURACY: {acc}   •   TIME: {time_s}", self.typo.body_bold, THEME.TEXT_SECONDARY, (r.centerx, stats_y), anchor="center")
+        stats_y = r.top + 160
+        self.typo.draw_text(screen, f"ACCURACY: {acc}   •   HITS: {hits}   •   SHOTS: {shots}   •   TIME: {time_s}", self.typo.body_bold, THEME.TEXT_SECONDARY, (r.centerx, stats_y), anchor="center")
 
         # Key actions
-        self.typo.draw_text(screen, "[ R ] Play Again    [ ESC / M ] Mode Select", self.typo.body_small, THEME.ACCENT_CYAN, (r.centerx, r.bottom - 24), anchor="center")
+        self.typo.draw_text(screen, "[ ENTER / R ] Play Again    [ ESC / M ] Mode Select", self.typo.body_small, THEME.ACCENT_CYAN, (r.centerx, r.bottom - 24), anchor="center")
 
     def _draw_crosshair(
         self,
@@ -912,53 +927,20 @@ class AimScreen:
         pinch: PinchResult | None,
         now: float,
     ) -> None:
-        """Render weapon-specific vector crosshair reticle."""
-        x, y = round(pos[0]), round(pos[1])
+        """Render weapon-specific vector crosshair reticle using modular CrosshairRenderer."""
         is_firing = (now < self._fire_pulse_until)
-        is_empty = (now < self._empty_click_until)
+        is_empty = (now < self._empty_click_until) or self._game.weapons.is_empty
         is_pinched = (pinch and pinch.phase is PinchPhase.PINCHED)
+        is_reloading = self._game.weapons.is_reloading
 
-        ret_col = THEME.ACCENT_CORAL if is_empty else (THEME.ACCENT_GOLD if is_firing else (THEME.ACCENT_EMERALD if is_pinched else THEME.ACCENT_CYAN))
-        w_type = self._game.weapons.spec.weapon_type
-
-        # Pistol: Minimal 4-line precision reticle with center dot
-        if w_type is WeaponType.PISTOL:
-            rad = 14
-            pygame.draw.circle(screen, (255, 255, 255), (x, y), 2)
-            pygame.draw.circle(screen, ret_col, (x, y), rad, 1)
-            pygame.draw.line(screen, ret_col, (x, y - rad - 6), (x, y - rad - 2), 2)
-            pygame.draw.line(screen, ret_col, (x, y + rad + 2), (x, y + rad + 6), 2)
-            pygame.draw.line(screen, ret_col, (x - rad - 6, y), (x - rad - 2, y), 2)
-            pygame.draw.line(screen, ret_col, (x + rad + 2, y), (x + rad + 6, y), 2)
-
-        # Assault Rifle: Dynamic 4-prong reticle expanding on recoil
-        elif w_type is WeaponType.ASSAULT_RIFLE:
-            spread_offset = round(self._recoil_offset_px * 0.8)
-            gap = 6 + spread_offset
-            length = 8
-            pygame.draw.circle(screen, (255, 255, 255), (x, y), 2)
-            pygame.draw.line(screen, ret_col, (x, y - gap - length), (x, y - gap), 2)
-            pygame.draw.line(screen, ret_col, (x, y + gap), (x, y + gap + length), 2)
-            pygame.draw.line(screen, ret_col, (x - gap - length, y), (x - gap, y), 2)
-            pygame.draw.line(screen, ret_col, (x + gap, y), (x + gap + length, y), 2)
-
-        # Shotgun: Wide dispersion circle with 4 radial ticks
-        elif w_type is WeaponType.SHOTGUN:
-            rad = round(self._game.weapons.spec.spread_radius_px)
-            pygame.draw.circle(screen, (255, 255, 255), (x, y), 2)
-            pygame.draw.circle(screen, ret_col, (x, y), rad, 1)
-            pygame.draw.line(screen, ret_col, (x, y - rad - 4), (x, y - rad + 4), 2)
-            pygame.draw.line(screen, ret_col, (x, y + rad - 4), (x, y + rad + 4), 2)
-            pygame.draw.line(screen, ret_col, (x - rad - 4, y), (x - rad + 4, y), 2)
-            pygame.draw.line(screen, ret_col, (x + rad - 4, y), (x + rad + 4, y), 2)
-
-        # Sniper: Fine hairline crosshair with precision circle
-        elif w_type is WeaponType.SNIPER:
-            rad = 18
-            pygame.draw.circle(screen, (255, 255, 255), (x, y), 1)
-            pygame.draw.circle(screen, ret_col, (x, y), rad, 1)
-            pygame.draw.line(screen, ret_col, (x, y - rad - 12), (x, y + rad + 12), 1)
-            pygame.draw.line(screen, ret_col, (x - rad - 12, y), (x + rad + 12, y), 1)
+        state = CrosshairState(
+            is_firing=is_firing,
+            is_empty=is_empty,
+            is_pinched=is_pinched,
+            is_reloading=is_reloading,
+            recoil_offset_px=self._recoil_offset_px,
+        )
+        draw_crosshair(screen, pos, self._game.weapons.spec.weapon_type, state)
 
     def _draw_shot_effect(self, screen: pygame.Surface, shot: ShotEffect, now: float) -> None:
         """Render expanding pulse ring on pellet impact."""
