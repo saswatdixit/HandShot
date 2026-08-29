@@ -1,4 +1,4 @@
-"""Phase 10.5 Pygame Aim Screen with complete UI/UX, typography, layout overhaul, and vector icons."""
+"""Phase 11 Pygame Aim Screen with componentized UI layout, precision aiming, and debug HUD overhaul."""
 
 from __future__ import annotations
 
@@ -17,8 +17,10 @@ from game.bubble_game import BubbleGame, GameState
 from game.game_mode import ALL_MODES, GameMode, ModeConfig
 from game.particles import ParticleSystem
 from game.typography import Typography
+from game.ui_layout import UILayout
 from game.ui_renderer import (
     draw_card,
+    draw_control_bar,
     draw_keycap,
     draw_vector_heart,
     draw_vector_leaf,
@@ -59,7 +61,7 @@ class FloatingScore:
 
 
 class AimScreen:
-    """Orchestrates arcade flow, responsive vector UI, and hand-aim interaction."""
+    """Orchestrates arcade game flow, responsive UI layout, and hand-aim interaction."""
 
     def __init__(
         self,
@@ -71,8 +73,12 @@ class AimScreen:
             pygame.init()
         if not pygame.font.get_init():
             pygame.font.init()
+
         self.camera = camera
         self.tracker = tracker
+        self.layout = UILayout((settings.GAME_WIDTH, settings.GAME_HEIGHT))
+        self.typo = Typography((settings.GAME_WIDTH, settings.GAME_HEIGHT))
+
         self._aim = AimController(
             (settings.GAME_WIDTH, settings.GAME_HEIGHT),
             AimSettings(
@@ -102,22 +108,20 @@ class AimScreen:
         self._audio_notify_until = 0.0
         self._audio_notify_text = ""
         self._game_over_entered_at = 0.0
-        self.typo = Typography((settings.GAME_WIDTH, settings.GAME_HEIGHT))
 
     def run(self, duration: float = 0.0) -> int:
-        pygame.init()
         screen = pygame.display.set_mode(
             (settings.GAME_WIDTH, settings.GAME_HEIGHT), pygame.RESIZABLE
         )
         pygame.display.set_caption(settings.GAME_WINDOW_NAME)
         clock = pygame.time.Clock()
-        self.typo.set_screen_size(screen.get_size())
+
+        self._resize(screen.get_size())
 
         started = time.perf_counter()
         last_result: TrackingResult | None = None
         running = True
         exit_code = 0
-        self._aim.set_playfield(self._playfield(screen.get_size()))
 
         try:
             while running:
@@ -129,9 +133,7 @@ class AimScreen:
                         running = False
                     elif event.type == pygame.VIDEORESIZE:
                         screen = pygame.display.set_mode(event.size, pygame.RESIZABLE)
-                        self.typo.set_screen_size(event.size)
-                        self._aim.set_screen_size(event.size)
-                        self._aim.set_playfield(self._playfield(event.size))
+                        self._resize(event.size)
                     elif event.type == pygame.KEYDOWN:
                         running = self._handle_key_event(event, screen, now)
 
@@ -184,6 +186,12 @@ class AimScreen:
             pygame.quit()
         return exit_code
 
+    def _resize(self, size: tuple[int, int]) -> None:
+        self.layout.update_screen_size(size)
+        self.typo.set_screen_size(size)
+        self._aim.set_screen_size(size)
+        self._aim.set_playfield(self.layout.playfield_bounds)
+
     # -- Input Handling ----------------------------------------------------
 
     def _handle_key_event(self, event: pygame.event.Event, screen: pygame.Surface, now: float) -> bool:
@@ -222,6 +230,7 @@ class AimScreen:
                     self.tracker.reset()
 
         elif event.key == pygame.K_d:
+            # Clean runtime toggle of Debug HUD
             self._debug_hud = not self._debug_hud
 
         # Mode Select Navigation
@@ -240,7 +249,7 @@ class AimScreen:
                 self.audio.play_sfx("menu_move")
             elif event.key in (pygame.K_RETURN, pygame.K_SPACE):
                 chosen_mode = ALL_MODES[self._selected_mode_idx]
-                self._game.set_mode(chosen_mode, self._playfield(screen.get_size()))
+                self._game.set_mode(chosen_mode, self.layout.playfield_bounds)
                 self._particles.clear()
                 self.audio.play_sfx("menu_select")
 
@@ -250,27 +259,27 @@ class AimScreen:
                 if paused:
                     self.audio.play_sfx("pause")
             elif event.key == pygame.K_r:
-                self._restart_run(screen, now)
+                self._restart_run(now)
 
         elif st is GameState.PAUSED:
             if event.key in (pygame.K_p, pygame.K_PAUSE, pygame.K_SPACE):
                 self._game.toggle_pause()
                 self.audio.play_sfx("menu_select")
             elif event.key == pygame.K_r:
-                self._restart_run(screen, now)
+                self._restart_run(now)
 
         elif st is GameState.GAME_OVER:
             if event.key == pygame.K_r:
-                self._restart_run(screen, now)
+                self._restart_run(now)
 
         return True
 
-    def _restart_run(self, screen: pygame.Surface, now: float) -> None:
+    def _restart_run(self, now: float) -> None:
         self._aim.reset()
         self._pinch.reset()
         self._floating_scores.clear()
         self._particles.clear()
-        self._game.reset(self._playfield(screen.get_size()), start_state=GameState.READY, now=now)
+        self._game.reset(self.layout.playfield_bounds, start_state=GameState.READY, now=now)
         if self.tracker is not None:
             self.tracker.reset()
         self.audio.stop_music()
@@ -284,7 +293,7 @@ class AimScreen:
 
         escaped = self._game.update(
             delta_seconds,
-            self._playfield(screen.get_size()),
+            self.layout.playfield_bounds,
             hand_tracked=has_hand,
             now=now,
         )
@@ -368,16 +377,16 @@ class AimScreen:
         pinch_result: PinchResult | None,
         now: float,
     ) -> None:
-        width, height = screen.get_size()
-        bounds = self._playfield((width, height))
+        w, h = screen.get_size()
+        bounds = self.layout.playfield_bounds
         screen.fill((9, 14, 23))
 
-        # Restrained minimal grid
+        # Minimal arcade grid
         grid_color = (16, 25, 40)
-        for x in range(0, width, 72):
-            pygame.draw.line(screen, grid_color, (x, 0), (x, height))
-        for y in range(0, height, 72):
-            pygame.draw.line(screen, grid_color, (0, y), (width, y))
+        for x in range(0, w, 72):
+            pygame.draw.line(screen, grid_color, (x, 0), (x, h))
+        for y in range(0, h, 72):
+            pygame.draw.line(screen, grid_color, (0, y), (w, y))
 
         # Bottom hazard boundary line (if mode allows life loss)
         if self._game.mode.allow_life_loss and self._game.state in (GameState.PLAYING, GameState.PAUSED):
@@ -393,7 +402,7 @@ class AimScreen:
         # Draw particles and shockwaves
         self._particles.draw(screen, now)
 
-        # Draw shot rings
+        # Draw shot feedback
         if self._shot is not None and self._shot.visible(now):
             shot_x, shot_y = round(self._shot.position[0]), round(self._shot.position[1])
             if self._shot.hit:
@@ -404,7 +413,7 @@ class AimScreen:
                 pygame.draw.line(screen, (255, 140, 90), (shot_x - 6, shot_y - 6), (shot_x + 6, shot_y + 6), 2)
                 pygame.draw.line(screen, (255, 140, 90), (shot_x - 6, shot_y + 6), (shot_x + 6, shot_y - 6), 2)
 
-        # Draw floating score popups
+        # Draw floating scores
         for fs in self._floating_scores:
             age = now - fs.created_at
             lifespan = fs.expires_at - fs.created_at
@@ -422,34 +431,38 @@ class AimScreen:
         # Life loss red edge flash
         if now < self._life_lost_flash_until:
             flash_alpha = round(((self._life_lost_flash_until - now) / 0.30) * 80)
-            flash_surf = pygame.Surface((width, height), pygame.SRCALPHA)
-            pygame.draw.rect(flash_surf, (255, 50, 50, flash_alpha), (0, 0, width, height), 6)
+            flash_surf = pygame.Surface((w, h), pygame.SRCALPHA)
+            pygame.draw.rect(flash_surf, (255, 50, 50, flash_alpha), (0, 0, w, h), 6)
             screen.blit(flash_surf, (0, 0))
 
         # Render Top HUD (isolated non-colliding zones)
         has_hand = (result is not None and result.has_hand)
         if self._game.state is not GameState.MODE_SELECT:
-            self._draw_hud(screen, result, width, height, now)
+            self._draw_hud(screen, result, now)
 
         # Render State Screens
         if self._game.state is GameState.MODE_SELECT:
-            self._draw_mode_select(screen, width, height, now)
+            self._draw_mode_select(screen, w, h)
         elif self._game.state is GameState.READY:
-            self._draw_ready(screen, width, height, has_hand)
+            self._draw_ready(screen, has_hand)
         elif self._game.state is GameState.COUNTDOWN:
-            self._draw_countdown(screen, width, height, now)
+            self._draw_countdown(screen, w, h)
         elif self._game.state is GameState.PAUSED:
-            self._draw_paused(screen, width, height)
+            self._draw_paused(screen)
         elif self._game.state is GameState.GAME_OVER:
-            self._draw_game_over(screen, width, height, now)
+            self._draw_game_over(screen, now)
 
         # Audio toast notification
         if now < self._audio_notify_until:
-            toast_rect = pygame.Rect(width - 170, height - 36, 150, 26)
+            toast_rect = pygame.Rect(w - 170, h - 74, 150, 26)
             draw_card(screen, toast_rect, (20, 32, 50, 220), (60, 95, 140), border_radius=6)
             self.typo.draw_text(screen, self._audio_notify_text, self.typo.small_bold, (255, 220, 80), toast_rect.center, anchor="center")
 
-        # Debug HUD (isolated below top bar)
+        # Bottom Control Strip
+        if self._game.state not in (GameState.MODE_SELECT, GameState.PAUSED):
+            draw_control_bar(screen, self.layout.control_bar_rect, self.typo, muted=self.audio.muted, debug_on=self._debug_hud)
+
+        # Debug HUD (toggled with D, strictly below top bar)
         if self._debug_hud:
             self._draw_debug_hud(screen, result, pinch_result, now)
 
@@ -459,24 +472,21 @@ class AimScreen:
         self,
         screen: pygame.Surface,
         result: TrackingResult | None,
-        width: int,
-        height: int,
         now: float,
     ) -> None:
         """Top Header Bar with strictly isolated Left, Center, and Right zones."""
         mode = self._game.mode
-        hud_h = 84
 
         # Header background panel
-        draw_card(screen, (0, 0, width, hud_h), (11, 17, 28, 240), (28, 42, 64), border_width=1, border_radius=0)
+        draw_card(screen, self.layout.top_bar_rect, (11, 17, 28, 240), (28, 42, 64), border_width=1, border_radius=0)
 
         # === 1. LEFT ZONE (Branding, Mode, Tracking) ===
-        lx = 24
-        self.typo.draw_text(screen, "HANDSHOT", self.typo.title, (130, 225, 255), (lx, 14), anchor="topleft")
-        self.typo.draw_text(screen, f"{mode.name} ARCADE", self.typo.subtitle, (140, 165, 195), (lx, 42), anchor="topleft")
+        lz = self.layout.left_zone
+        self.typo.draw_text(screen, "HANDSHOT", self.typo.title, (130, 225, 255), (lz.left, lz.top + 2), anchor="topleft")
+        self.typo.draw_text(screen, f"{mode.name} ARCADE", self.typo.subtitle, (220, 235, 250), (lz.left, lz.top + 26), anchor="topleft")
 
         # Tracking status pill
-        track_y = 64
+        track_y = lz.top + 48
         if self.tracker is None:
             st_col, st_txt = (150, 150, 150), "TRACKING OFF"
         elif result is not None and result.has_hand:
@@ -486,13 +496,14 @@ class AimScreen:
         else:
             st_col, st_txt = (240, 180, 80), "SEARCHING"
 
-        pygame.draw.circle(screen, st_col, (lx + 4, track_y + 4), 4)
-        self.typo.draw_text(screen, st_txt, self.typo.small_bold, st_col, (lx + 14, track_y), anchor="topleft")
+        pygame.draw.circle(screen, st_col, (lz.left + 4, track_y + 6), 4)
+        self.typo.draw_text(screen, st_txt, self.typo.small_bold, st_col, (lz.left + 14, track_y), anchor="topleft")
 
         # === 2. CENTER ZONE (Score & Combo Badge) ===
-        cx = width // 2
-        self.typo.draw_text(screen, "SCORE", self.typo.hud_label, (140, 165, 195), (cx, 12), anchor="midtop")
-        self.typo.draw_text(screen, f"{self._game.score.score:,}", self.typo.score, (115, 235, 255), (cx, 28), anchor="midtop")
+        cz = self.layout.center_zone
+        cx = cz.centerx
+        self.typo.draw_text(screen, "SCORE", self.typo.hud_label, (140, 165, 195), (cx, cz.top + 2), anchor="midtop")
+        self.typo.draw_text(screen, f"{self._game.score.score:,}", self.typo.score, (115, 235, 255), (cx, cz.top + 16), anchor="midtop")
 
         # Combo badge (compact pill underneath score)
         if mode.allow_combo and self._game.combo.current_combo > 1:
@@ -505,54 +516,46 @@ class AimScreen:
             badge_col = (255, 180, 70) if is_streak else (255, 225, 90)
 
             badge_w, badge_h = self.typo.measure_text(combo_text, self.typo.small_bold)
-            badge_rect = pygame.Rect(cx - (badge_w + 16) // 2, 58, badge_w + 16, badge_h + 4)
+            badge_rect = pygame.Rect(cx - (badge_w + 16) // 2, cz.top + 45, badge_w + 16, badge_h + 4)
             draw_card(screen, badge_rect, badge_bg, badge_border, border_radius=5)
             self.typo.draw_text(screen, combo_text, self.typo.small_bold, badge_col, badge_rect.center, anchor="center")
 
-        # === 3. RIGHT ZONE (Best, Lives / Timer, Accuracy, Mute) ===
-        rx = width - 24
-        self.typo.draw_text(screen, "BEST", self.typo.hud_label, (140, 165, 195), (rx - 65, 12), anchor="topright")
-        self.typo.draw_text(screen, f"{self._game.high_score:,}", self.typo.hud_value, (255, 215, 80), (rx, 10), anchor="topright")
+        # === 3. RIGHT ZONE (Best, Accuracy, Lives / Timer, Mute) ===
+        rz = self.layout.right_zone
+        rx = rz.right
 
-        # Mode status row (Hearts / Timer / Mode Tag)
-        status_y = 40
+        # Top row: BEST Score
+        self.typo.draw_text(screen, "BEST", self.typo.hud_label, (140, 165, 195), (rx - 70, rz.top + 2), anchor="topright")
+        self.typo.draw_text(screen, f"{self._game.high_score:,}", self.typo.hud_value, (255, 215, 80), (rx, rz.top), anchor="topright")
+
+        # Middle row: ACCURACY & Mute icon
+        acc_y = rz.top + 24
+        self.typo.draw_text(screen, f"ACCURACY {self._game.stats.accuracy:.1f}%", self.typo.small_bold, (160, 185, 210), (rx - 26, acc_y), anchor="topright")
+        draw_vector_speaker(screen, rx - 8, acc_y + 6, radius=7, muted=self.audio.muted)
+
+        # Bottom row: Mode Status (Hearts / Timer / Target Badge)
+        status_y = rz.top + 46
         if mode.allow_life_loss:
             for i in range(mode.initial_lives):
                 is_active = (i < self._game.stats.lives)
-                draw_vector_heart(screen, rx - 48 + i * 22, status_y + 4, size=16, active=is_active)
+                draw_vector_heart(screen, rx - 50 + i * 22, status_y + 6, size=16, active=is_active)
         elif mode.time_limit_seconds is not None:
             rem = self._game.time_remaining or 0.0
             time_col = (255, 95, 95) if rem < 10.0 else (255, 215, 80)
-            draw_vector_stopwatch(screen, rx - 65, status_y + 4, radius=8, color=time_col)
-            self.typo.draw_text(screen, f"{rem:.1f}s", self.typo.hud_value, time_col, (rx, status_y - 2), anchor="topright")
+            draw_vector_stopwatch(screen, rx - 65, status_y + 6, radius=8, color=time_col)
+            self.typo.draw_text(screen, f"{rem:.1f}s", self.typo.hud_value, time_col, (rx, status_y), anchor="topright")
         else:
             if mode.mode == GameMode.CHILL:
-                draw_vector_leaf(screen, rx - 70, status_y + 4, radius=8)
+                draw_vector_leaf(screen, rx - 70, status_y + 6, radius=8)
             else:
-                draw_vector_target(screen, rx - 70, status_y + 4, radius=8)
-            self.typo.draw_text(screen, mode.badge, self.typo.body_bold, (110, 235, 150), (rx, status_y - 2), anchor="topright")
-
-        # Accuracy & Audio Mute icon row
-        acc_y = 64
-        self.typo.draw_text(screen, f"ACCURACY {self._game.stats.accuracy:.1f}%", self.typo.small, (160, 185, 210), (rx - 30, acc_y), anchor="topright")
-        draw_vector_speaker(screen, rx - 8, acc_y + 6, radius=7, muted=self.audio.muted)
-
-        # Bottom control hints
-        self.typo.draw_text(
-            screen,
-            "[P] Pause    [R] Restart    [M] Mute    [C] Mirror    [D] Debug HUD",
-            self.typo.small,
-            (140, 160, 185),
-            (width // 2, height - 20),
-            anchor="midbottom",
-        )
+                draw_vector_target(screen, rx - 70, status_y + 6, radius=8)
+            self.typo.draw_text(screen, mode.badge, self.typo.body_bold, (110, 235, 150), (rx, status_y), anchor="topright")
 
     def _draw_mode_select(
         self,
         screen: pygame.Surface,
         width: int,
         height: int,
-        now: float,
     ) -> None:
         """Balanced 2x2 Grid Mode Selection Screen with rich vector cards."""
         overlay = pygame.Surface((width, height), pygame.SRCALPHA)
@@ -570,7 +573,6 @@ class AimScreen:
         gap_y = 20
 
         grid_w = card_w * 2 + gap_x
-        grid_h = card_h * 2 + gap_y
         start_x = (width - grid_w) // 2
         start_y = 135
 
@@ -606,7 +608,7 @@ class AimScreen:
 
             # Selection Pill Tag
             if is_selected:
-                draw_keycap(screen, "SELECTED", self.typo.small_bold, card_x + card_w - 55, card_y + 30, text_color=(105, 245, 160), bg_color=(20, 48, 42), border_color=(45, 160, 110))
+                draw_keycap(screen, "SELECTED", "", self.typo.small_bold, self.typo.small, card_x + card_w - 55, card_y + 30, active=True, active_color=(105, 245, 160))
 
             # Mode Tagline & Description
             desc_col = (195, 215, 235) if is_selected else (140, 155, 175)
@@ -630,38 +632,33 @@ class AimScreen:
     def _draw_ready(
         self,
         screen: pygame.Surface,
-        width: int,
-        height: int,
         has_hand: bool,
     ) -> None:
         """Polished Hand Acquisition Card with animated progress."""
-        card_w, card_h = min(480, width - 40), 290
-        card_x = (width - card_w) // 2
-        card_y = (height - card_h) // 2
-
-        draw_card(screen, (card_x, card_y, card_w, card_h), (11, 18, 30, 240), (50, 75, 115), border_width=2, border_radius=14)
+        r = self.layout.ready_card_rect
+        draw_card(screen, r, (11, 18, 30, 240), (50, 75, 115), border_width=2, border_radius=14)
 
         # Header Title & Subtitle
-        self.typo.draw_text(screen, f"HANDSHOT • {self._game.mode.name}", self.typo.title, (130, 225, 255), (width // 2, card_y + 36), anchor="center")
-        self.typo.draw_text(screen, "READY TO PLAY", self.typo.heading, (255, 220, 80), (width // 2, card_y + 76), anchor="center")
+        self.typo.draw_text(screen, f"HANDSHOT • {self._game.mode.name}", self.typo.title, (130, 225, 255), (r.centerx, r.top + 36), anchor="center")
+        self.typo.draw_text(screen, "READY TO PLAY", self.typo.heading, (255, 220, 80), (r.centerx, r.top + 76), anchor="center")
 
         # Central Status Indicator Box
         box_w = 340
         box_h = 100
-        box_x = (width - box_w) // 2
-        box_y = card_y + 110
+        box_x = r.centerx - box_w // 2
+        box_y = r.top + 110
 
         draw_card(screen, (box_x, box_y, box_w, box_h), (16, 26, 42, 200), (40, 60, 90), border_radius=8)
 
         if has_hand:
             progress = min(1.0, self._game.ready_hand_timer / max(settings.READY_HAND_STABLE_SECONDS, 1e-6))
-            self.typo.draw_text(screen, "HAND DETECTED", self.typo.heading, (105, 245, 160), (width // 2, box_y + 24), anchor="center")
-            self.typo.draw_text(screen, "Calibrating...", self.typo.small, (170, 200, 230), (width // 2, box_y + 50), anchor="center")
+            self.typo.draw_text(screen, "HAND DETECTED", self.typo.heading, (105, 245, 160), (r.centerx, box_y + 24), anchor="center")
+            self.typo.draw_text(screen, "Calibrating...", self.typo.small, (170, 200, 230), (r.centerx, box_y + 50), anchor="center")
 
             # Progress Bar
             bar_w = 240
             bar_h = 8
-            bar_x = (width - bar_w) // 2
+            bar_x = r.centerx - bar_w // 2
             bar_y = box_y + 72
             pygame.draw.rect(screen, (28, 44, 66), (bar_x, bar_y, bar_w, bar_h), border_radius=4)
             fill_w = round(bar_w * progress)
@@ -669,18 +666,17 @@ class AimScreen:
                 pygame.draw.rect(screen, (105, 245, 160), (bar_x, bar_y, fill_w, bar_h), border_radius=4)
             self.typo.draw_text(screen, f"{round(progress * 100)}%", self.typo.small_bold, (105, 245, 160), (bar_x + bar_w + 10, bar_y - 2), anchor="topleft")
         else:
-            self.typo.draw_text(screen, "SHOW YOUR HAND", self.typo.heading, (240, 185, 80), (width // 2, box_y + 32), anchor="center")
-            self.typo.draw_text(screen, "Waiting for camera tracking...", self.typo.body, (170, 190, 215), (width // 2, box_y + 64), anchor="center")
+            self.typo.draw_text(screen, "SHOW YOUR HAND", self.typo.heading, (240, 185, 80), (r.centerx, box_y + 32), anchor="center")
+            self.typo.draw_text(screen, "Waiting for camera tracking...", self.typo.body, (170, 190, 215), (r.centerx, box_y + 64), anchor="center")
 
         # Bottom Hint
-        self.typo.draw_text(screen, "Hold your index finger naturally in view to begin", self.typo.small, (150, 175, 205), (width // 2, card_y + 245), anchor="center")
+        self.typo.draw_text(screen, "Hold your index finger naturally in view to begin", self.typo.small, (150, 175, 205), (r.centerx, r.top + 245), anchor="center")
 
     def _draw_countdown(
         self,
         screen: pygame.Surface,
         width: int,
         height: int,
-        now: float,
     ) -> None:
         """Punchy, animated single-numeral countdown with zero overlapping HUD clutter."""
         text = self._game.countdown_text
@@ -702,22 +698,18 @@ class AimScreen:
     def _draw_paused(
         self,
         screen: pygame.Surface,
-        width: int,
-        height: int,
     ) -> None:
         """Clean modal Pause Screen."""
-        overlay = pygame.Surface((width, height), pygame.SRCALPHA)
+        w, h = screen.get_size()
+        overlay = pygame.Surface((w, h), pygame.SRCALPHA)
         overlay.fill((8, 14, 24, 220))
         screen.blit(overlay, (0, 0))
 
-        card_w, card_h = min(440, width - 40), 310
-        card_x = (width - card_w) // 2
-        card_y = (height - card_h) // 2
+        r = self.layout.pause_card_rect
+        draw_card(screen, r, (14, 22, 36, 250), (55, 80, 120), border_width=2, border_radius=14)
 
-        draw_card(screen, (card_x, card_y, card_w, card_h), (14, 22, 36, 250), (55, 80, 120), border_width=2, border_radius=14)
-
-        self.typo.draw_text(screen, "PAUSED", self.typo.title, (255, 220, 80), (width // 2, card_y + 36), anchor="center")
-        self.typo.draw_text(screen, f"{self._game.mode.name} MODE  |  SCORE: {self._game.score.score:,}", self.typo.subtitle, (150, 180, 215), (width // 2, card_y + 72), anchor="center")
+        self.typo.draw_text(screen, "PAUSED", self.typo.title, (255, 220, 80), (r.centerx, r.top + 36), anchor="center")
+        self.typo.draw_text(screen, f"{self._game.mode.name} MODE  |  SCORE: {self._game.score.score:,}", self.typo.subtitle, (150, 180, 215), (r.centerx, r.top + 72), anchor="center")
 
         options = [
             ("P / SPACE", "Resume Game", (105, 245, 160)),
@@ -726,29 +718,25 @@ class AimScreen:
             ("Q / ESC", "Quit Game", (255, 120, 120)),
         ]
 
-        oy = card_y + 115
+        oy = r.top + 115
         for key_text, label, col in options:
-            draw_keycap(screen, key_text, self.typo.small_bold, card_x + 75, oy + 10, text_color=col)
-            self.typo.draw_text(screen, label, self.typo.body, (230, 240, 250), (card_x + 155, oy), anchor="topleft")
+            draw_keycap(screen, key_text, "", self.typo.small_bold, self.typo.small, r.left + 75, oy + 10, active=True, active_color=col)
+            self.typo.draw_text(screen, label, self.typo.body, (230, 240, 250), (r.left + 155, oy), anchor="topleft")
             oy += 36
 
     def _draw_game_over(
         self,
         screen: pygame.Surface,
-        width: int,
-        height: int,
         now: float,
     ) -> None:
         """Rewarding Results Card with animated score count-up and vector breakdown table."""
-        overlay = pygame.Surface((width, height), pygame.SRCALPHA)
+        w, h = screen.get_size()
+        overlay = pygame.Surface((w, h), pygame.SRCALPHA)
         overlay.fill((8, 14, 24, 235))
         screen.blit(overlay, (0, 0))
 
-        card_w, card_h = min(480, width - 40), 410
-        card_x = (width - card_w) // 2
-        card_y = (height - card_h) // 2
-
-        draw_card(screen, (card_x, card_y, card_w, card_h), (14, 22, 36, 250), (55, 80, 125), border_width=2, border_radius=14)
+        r = self.layout.results_card_rect
+        draw_card(screen, r, (14, 22, 36, 250), (55, 80, 125), border_width=2, border_radius=14)
 
         mode = self._game.mode
         if mode.time_limit_seconds is not None:
@@ -758,22 +746,22 @@ class AimScreen:
         else:
             header_text, header_col = "RUN COMPLETE", (105, 245, 160)
 
-        self.typo.draw_text(screen, header_text, self.typo.title, header_col, (width // 2, card_y + 32), anchor="center")
+        self.typo.draw_text(screen, header_text, self.typo.title, header_col, (r.centerx, r.top + 32), anchor="center")
 
         # Animated Score Count-up
         elapsed = max(0.0, now - self._game_over_entered_at)
         count_progress = min(1.0, elapsed / 0.8)
         display_score = round(self._game.score.score * count_progress)
 
-        self.typo.draw_text(screen, f"{display_score:,}", self.typo.display_l, (115, 235, 255), (width // 2, card_y + 70), anchor="center")
-        self.typo.draw_text(screen, "FINAL SCORE", self.typo.hud_label, (140, 165, 195), (width // 2, card_y + 98), anchor="center")
+        self.typo.draw_text(screen, f"{display_score:,}", self.typo.display_l, (115, 235, 255), (r.centerx, r.top + 70), anchor="center")
+        self.typo.draw_text(screen, "FINAL SCORE", self.typo.hud_label, (140, 165, 195), (r.centerx, r.top + 98), anchor="center")
 
         # New High Score Star Banner
-        sy = card_y + 115
+        sy = r.top + 115
         if self._game.is_new_high_score:
-            draw_vector_star(screen, (width // 2) - 110, sy + 6, radius=8)
-            draw_vector_star(screen, (width // 2) + 110, sy + 6, radius=8)
-            self.typo.draw_text(screen, "NEW HIGH SCORE", self.typo.small_bold, (255, 220, 80), (width // 2, sy), anchor="center")
+            draw_vector_star(screen, r.centerx - 110, sy + 6, radius=8)
+            draw_vector_star(screen, r.centerx + 110, sy + 6, radius=8)
+            self.typo.draw_text(screen, "NEW HIGH SCORE", self.typo.small_bold, (255, 220, 80), (r.centerx, sy), anchor="center")
             sy += 24
 
         # Statistics Table
@@ -788,8 +776,8 @@ class AimScreen:
             ("Highest Combo", f"×{stats.highest_combo}"),
         ]
 
-        table_w = card_w - 70
-        table_x = card_x + 35
+        table_w = r.width - 70
+        table_x = r.left + 35
         for i, (label, val) in enumerate(stat_rows):
             row_y = sy + i * 22
             if i % 2 == 0:
@@ -798,8 +786,8 @@ class AimScreen:
             self.typo.draw_text(screen, val, self.typo.small_bold, (240, 245, 255), (table_x + table_w - 10, row_y), anchor="topright")
 
         # Action Buttons
-        by = card_y + card_h - 38
-        self.typo.draw_text(screen, "[ R ] PLAY AGAIN    [ M ] CHANGE MODE    [ Q ] QUIT", self.typo.button, (110, 235, 255), (width // 2, by), anchor="center")
+        by = r.top + r.height - 38
+        self.typo.draw_text(screen, "[ R ] PLAY AGAIN    [ M ] CHANGE MODE    [ Q ] QUIT", self.typo.button, (110, 235, 255), (r.centerx, by), anchor="center")
 
     # -- Target & Crosshair Drawing ----------------------------------------
 
@@ -885,13 +873,8 @@ class AimScreen:
         now: float,
     ) -> None:
         """Render isolated, compact monospaced Debug Panel strictly below top HUD."""
-        width, _ = screen.get_size()
-        panel_w = 260
-        panel_h = 200
-        panel_x = width - panel_w - 20
-        panel_y = 96  # Strictly below the top HUD bar
-
-        draw_card(screen, (panel_x, panel_y, panel_w, panel_h), (8, 14, 24, 230), (45, 70, 105), border_radius=8)
+        r = self.layout.debug_panel_rect
+        draw_card(screen, r, (8, 14, 24, 230), (45, 70, 105), border_radius=8)
 
         cam_fps = self.camera.measured_fps if self.camera is not None else 0.0
         cam_backend = self.camera.backend_name if self.camera is not None else "n/a"
@@ -953,7 +936,7 @@ class AimScreen:
 
         stats_text = f"LIVES: {self._game.stats.lives}  HITS: {self._game.stats.targets_hit}  SHOTS: {self._game.stats.shots_fired}"
 
-        y = panel_y + 8
+        y = r.top + 8
         for line, col in [
             (cam_text, (130, 220, 255)),
             (st_text, st_color),
@@ -963,13 +946,13 @@ class AimScreen:
             (shot_text, shot_color),
             (stats_text, (130, 220, 255)),
         ]:
-            self.typo.draw_text(screen, line, self.typo.debug, col, (panel_x + 10, y), anchor="topleft")
+            self.typo.draw_text(screen, line, self.typo.debug, col, (r.left + 10, y), anchor="topleft")
             y += 20
 
         # Gauge bar at bottom of panel
-        gauge_x = panel_x + 10
-        gauge_y = panel_y + panel_h - 16
-        gauge_w = panel_w - 20
+        gauge_x = r.left + 10
+        gauge_y = r.top + r.height - 16
+        gauge_w = r.width - 20
         gauge_h = 6
         pygame.draw.rect(screen, (28, 42, 60), (gauge_x, gauge_y, gauge_w, gauge_h))
 
@@ -982,12 +965,3 @@ class AimScreen:
         if dist_val is not None:
             cur_x = gauge_x + round(min(1.0, max(0.0, dist_val / max_disp)) * gauge_w)
             pygame.draw.circle(screen, (255, 255, 255), (cur_x, gauge_y + gauge_h // 2), 4)
-
-    def _playfield(self, screen_size: tuple[int, int]) -> Bounds:
-        width, height = screen_size
-        return (
-            float(settings.PLAYFIELD_LEFT),
-            float(settings.PLAYFIELD_TOP),
-            float(max(settings.PLAYFIELD_LEFT + 1, width - settings.PLAYFIELD_RIGHT_INSET)),
-            float(max(settings.PLAYFIELD_TOP + 1, height - settings.PLAYFIELD_BOTTOM_INSET)),
-        )

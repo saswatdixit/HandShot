@@ -216,12 +216,21 @@ AUDIO_MASTER_VOLUME = 0.80
 AUDIO_SFX_VOLUME = 0.90
 AUDIO_MUSIC_VOLUME = 0.55
 
-# Keep the entire bubble (not merely its centre) out of HUD/instruction areas
-# and within the range covered by the crosshair controller.
+# --------------------------------------------------------------------------
+# UI Layout Safe Zones & Dimensions
+# --------------------------------------------------------------------------
+
+HUD_MARGIN_X = 24
+HUD_MARGIN_Y = 12
+HUD_HEIGHT = 88
+CONTROL_BAR_HEIGHT = 44
+
+# Keep the entire bubble (not merely its centre) strictly outside HUD and
+# control bar areas, and within the range reachable by the crosshair.
 PLAYFIELD_LEFT = CROSSHAIR_MARGIN
-PLAYFIELD_TOP = 106
+PLAYFIELD_TOP = HUD_HEIGHT + 20
 PLAYFIELD_RIGHT_INSET = CROSSHAIR_MARGIN
-PLAYFIELD_BOTTOM_INSET = 92
+PLAYFIELD_BOTTOM_INSET = CONTROL_BAR_HEIGHT + 26
 
 
 # --------------------------------------------------------------------------
