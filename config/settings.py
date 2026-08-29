@@ -125,6 +125,15 @@ PINCH_COOLDOWN_SECONDS = 0.04
 PINCH_DEBOUNCE_FRAMES = 1
 PINCH_DISTANCE_FILTER_SAMPLES = 1
 
+# --------------------------------------------------------------------------
+# Multi-Gesture System Settings
+# --------------------------------------------------------------------------
+GESTURE_CONFIRM_FRAMES = 2
+GESTURE_RELEASE_FRAMES = 2
+PALM_CLOSE_THRESHOLD = 0.55
+PALM_OPEN_THRESHOLD = 0.75
+GESTURE_COOLDOWN_SECONDS = 0.35
+
 # Visual effects durations (clean and brief)
 TRAINING_TARGET_RADIUS = 44
 TARGET_HIT_EFFECT_SECONDS = 0.25

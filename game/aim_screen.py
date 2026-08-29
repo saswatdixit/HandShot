@@ -32,7 +32,15 @@ from game.ui_renderer import (
     draw_vector_target,
     draw_vector_webcam,
 )
-from gestures.pinch_detector import PinchDetector, PinchPhase, PinchResult
+from gestures import (
+    GestureDetector,
+    GestureResult,
+    GestureSettings,
+    HandGesture,
+    PinchDetector,
+    PinchPhase,
+    PinchResult,
+)
 
 if TYPE_CHECKING:
     from camera.hand_tracker import HandTracker, TrackingResult
@@ -63,12 +71,12 @@ class FloatingScore:
 
 
 class AimScreen:
-    """Orchestrates arcade game flow, camera sources, and minimalist modern UI."""
+    """Arcade Handshot Aim Trainer with local webcam tracking and multi-gesture support."""
 
     def __init__(
         self,
-        camera: CameraManager | None,
-        tracker: HandTracker | None,
+        camera: CameraManager | None = None,
+        tracker: HandTracker | None = None,
         debug_hud: bool = False,
     ) -> None:
         if not pygame.get_init():
@@ -94,7 +102,7 @@ class AimScreen:
                 pre_shot_anchor_seconds=settings.AIM_PRE_SHOT_ANCHOR_SECONDS,
             ),
         )
-        self._pinch = PinchDetector()
+        self._gestures = GestureDetector()
         self._game = BubbleGame(start_state=GameState.MODE_SELECT)
         self.audio = AudioManager()
         self._particles = ParticleSystem()
@@ -103,12 +111,14 @@ class AimScreen:
         self._fire_pulse_until = 0.0
         self._life_lost_flash_until = 0.0
         self._debug_hud = debug_hud
-        self._last_pinch: PinchResult | None = None
+        self._last_gesture: GestureResult | None = None
         self._last_shot_display_until = 0.0
         self._selected_mode_idx = 0
         self._last_countdown_number = 3
         self._audio_notify_until = 0.0
         self._audio_notify_text = ""
+        self._gesture_notify_until = 0.0
+        self._gesture_notify_text = ""
         self._game_over_entered_at = 0.0
 
     def run(self, duration: float = 0.0) -> int:
@@ -141,21 +151,19 @@ class AimScreen:
 
                 # Camera & Hand Tracking Update
                 frame = self.camera.read() if self.camera else None
-                pinch_result: PinchResult | None = None
+                gesture_result: GestureResult | None = None
                 has_hand = False
 
                 if frame is not None and self.tracker is not None:
                     last_result = self.tracker.process(frame, mirrored=self.camera.mirror if self.camera else False)
                     has_hand = (last_result.hand is not None)
-                    if has_hand:
-                        pinch_result = self._pinch.update(last_result.hand, now)
-                    else:
-                        pinch_result = self._pinch.update(None, now)
+                    gesture_result = self._gestures.update(last_result.hand if has_hand else None, now)
                 elif self.tracker is not None:
-                    pinch_result = self._pinch.update(None, now)
+                    gesture_result = self._gestures.update(None, now)
 
-                if pinch_result is not None:
-                    self._last_pinch = pinch_result
+                if gesture_result is not None:
+                    self._last_gesture = gesture_result
+                pinch_result = gesture_result.pinch_result if gesture_result is not None else None
 
                 fingertip = (
                     last_result.hand.index_tip_norm
@@ -168,15 +176,35 @@ class AimScreen:
                 self._update_simulation(delta_seconds, screen, has_hand, now)
 
                 # Handle Shooting Action
-                if pinch_result and pinch_result.shot and self._game.state is GameState.PLAYING:
+                if gesture_result and gesture_result.shot and self._game.state is GameState.PLAYING:
                     self._handle_shot(aim_pos, now)
+
+                # Handle Gesture Actions (Pause / Weapon Switch / Reload)
+                if gesture_result:
+                    if gesture_result.pause_toggle:
+                        if self._game.state is GameState.PLAYING:
+                            self._game.toggle_pause()
+                            self.audio.play_sfx("pause")
+                            self._gesture_notify_text = "PAUSED (CLOSED PALM)"
+                            self._gesture_notify_until = now + 1.2
+                        elif self._game.state is GameState.PAUSED:
+                            self._game.toggle_pause()
+                            self.audio.play_sfx("menu_select")
+                            self._gesture_notify_text = "RESUMED (CLOSED PALM)"
+                            self._gesture_notify_until = now + 1.2
+                    elif gesture_result.weapon_switch and self._game.state is GameState.PLAYING:
+                        self._gesture_notify_text = "WEAPON SWITCH (SOON)"
+                        self._gesture_notify_until = now + 0.9
+                    elif gesture_result.reload and self._game.state is GameState.PLAYING:
+                        self._gesture_notify_text = "RELOAD (SOON)"
+                        self._gesture_notify_until = now + 0.9
 
                 # Particle System & Floating Scores Update
                 self._particles.update(delta_seconds, now)
                 self._floating_scores = [fs for fs in self._floating_scores if fs.visible(now)]
 
                 # Render Complete UI & Game Elements
-                self._draw(screen, last_result, pinch_result, aim_pos, now)
+                self._draw(screen, last_result, gesture_result, aim_pos, now)
                 pygame.display.flip()
 
                 if duration and (time.perf_counter() - started) >= duration:
@@ -230,7 +258,7 @@ class AimScreen:
             if self.camera:
                 self.camera.toggle_mirror()
                 self._aim.reset()
-                self._pinch.reset()
+                self._gestures.reset()
                 if self.tracker:
                     self.tracker.reset()
 
@@ -280,7 +308,7 @@ class AimScreen:
 
     def _restart_run(self, now: float) -> None:
         self._aim.reset()
-        self._pinch.reset()
+        self._gestures.reset()
         self._floating_scores.clear()
         self._particles.clear()
         self._game.reset(self.layout.playfield_bounds, start_state=GameState.READY, now=now)
@@ -408,7 +436,7 @@ class AimScreen:
         self,
         screen: pygame.Surface,
         result: TrackingResult | None,
-        pinch_result: PinchResult | None,
+        gesture_result: GestureResult | None,
         aim_pos: tuple[float, float],
         now: float,
     ) -> None:
@@ -448,7 +476,8 @@ class AimScreen:
             self._draw_shot_effect(screen, self._shot, now)
 
         # Render Crosshair Reticle
-        self._draw_crosshair(screen, aim_pos, pinch_result, now)
+        pinch_res = gesture_result.pinch_result if gesture_result else None
+        self._draw_crosshair(screen, aim_pos, pinch_res, now)
 
         # Damage Screen Flash
         if now < self._life_lost_flash_until:
@@ -479,13 +508,19 @@ class AimScreen:
             draw_card(screen, toast_rect, (20, 28, 42, 220), THEME.BORDER_SUBTLE, border_radius=6)
             self.typo.draw_text(screen, self._audio_notify_text, self.typo.body_bold, THEME.ACCENT_GOLD, toast_rect.center, anchor="center")
 
+        # Gesture action toast notification
+        if now < self._gesture_notify_until:
+            g_toast_rect = pygame.Rect(w // 2 - 130, h - 74, 260, 26)
+            draw_card(screen, g_toast_rect, (16, 24, 38, 220), THEME.BORDER_SUBTLE, border_radius=6)
+            self.typo.draw_text(screen, self._gesture_notify_text, self.typo.body_bold, THEME.ACCENT_CYAN, g_toast_rect.center, anchor="center")
+
         # Bottom Control Strip
         if self._game.state not in (GameState.MODE_SELECT, GameState.PAUSED):
             draw_control_bar(screen, self.layout.control_bar_rect, self.typo, muted=self.audio.muted, debug_on=self._debug_hud)
 
         # Debug HUD (toggled with D, strictly below top bar)
         if self._debug_hud:
-            self._draw_debug_hud(screen, result, pinch_result, now)
+            self._draw_debug_hud(screen, result, gesture_result, now)
 
     # -- UI Screens & HUD Layout -------------------------------------------
 
@@ -534,26 +569,26 @@ class AimScreen:
             self.typo.draw_text(screen, "CHILL MODE", self.typo.label, THEME.ACCENT_EMERALD, (z_c.right - 14, z_c.centery), anchor="right")
 
     def _draw_mode_select(self, screen: pygame.Surface, width: int, height: int) -> None:
-        """Render mode selection screen with modern aesthetic cards."""
+        """Render mode selection screen with modern aesthetic cards and gesture guide."""
         overlay = pygame.Surface((width, height), pygame.SRCALPHA)
         overlay.fill((*THEME.BG_DARK, 220))
         screen.blit(overlay, (0, 0))
 
         # Title
-        self.typo.draw_text(screen, "HANDSHOT", self.typo.display, THEME.ACCENT_CYAN, (width // 2, 60), anchor="center")
-        self.typo.draw_text(screen, "SELECT GAME MODE", self.typo.h2, THEME.TEXT_PRIMARY, (width // 2, 115), anchor="center")
+        self.typo.draw_text(screen, "HANDSHOT", self.typo.display, THEME.ACCENT_CYAN, (width // 2, 54), anchor="center")
+        self.typo.draw_text(screen, "SELECT GAME MODE", self.typo.h2, THEME.TEXT_PRIMARY, (width // 2, 108), anchor="center")
 
         # 4 Mode Cards (2x2 Grid)
         card_w = min(420, (width - 80) // 2)
-        card_h = min(150, (height - 240) // 2)
+        card_h = min(142, (height - 250) // 2)
         start_x = (width - (card_w * 2 + 24)) // 2
-        start_y = 150
+        start_y = 140
 
         for i, m in enumerate(ALL_MODES):
             row = i // 2
             col = i % 2
             x = start_x + col * (card_w + 24)
-            y = start_y + row * (card_h + 18)
+            y = start_y + row * (card_h + 16)
             rect = pygame.Rect(x, y, card_w, card_h)
 
             is_sel = (i == self._selected_mode_idx)
@@ -577,15 +612,25 @@ class AimScreen:
 
             # Text
             text_x = x + 72
-            self.typo.draw_text(screen, m.name.upper(), self.typo.h1, THEME.TEXT_PRIMARY, (text_x, y + 26), anchor="left")
-            self.typo.draw_text(screen, m.tagline, self.typo.body_small, THEME.TEXT_SECONDARY, (text_x, y + 62), anchor="left")
+            self.typo.draw_text(screen, m.name.upper(), self.typo.h1, THEME.TEXT_PRIMARY, (text_x, y + 24), anchor="left")
+            self.typo.draw_text(screen, m.tagline, self.typo.body_small, THEME.TEXT_SECONDARY, (text_x, y + 58), anchor="left")
 
             hi = self._game.high_score if self._game.mode.mode == m.mode else 0
             if hi > 0:
-                self.typo.draw_text(screen, f"BEST: {hi:,}", self.typo.caption, THEME.ACCENT_GOLD, (text_x, y + 92), anchor="left")
+                self.typo.draw_text(screen, f"BEST: {hi:,}", self.typo.caption, THEME.ACCENT_GOLD, (text_x, y + 88), anchor="left")
 
             if is_sel:
                 draw_keycap(screen, "READY", "", self.typo.label, self.typo.caption, x + card_w - 50, y + card_h // 2, active=True)
+
+        # Compact Gesture Guide
+        self.typo.draw_text(
+            screen,
+            "GESTURES:  Aim (Point)   •   Shoot (Pinch)   •   Pause (Close Palm)   •   Weapon (Two Fingers)   •   Reload (Thumbs Up)",
+            self.typo.caption,
+            THEME.TEXT_MUTED,
+            (width // 2, height - 56),
+            anchor="center",
+        )
 
         # Footer Instruction
         self.typo.draw_text(
@@ -593,7 +638,7 @@ class AimScreen:
             "[ WASD / Arrows ] Choose Mode    [ ENTER / SPACE ] Start Game    [ M ] Mute    [ ESC / Q ] Quit",
             self.typo.body_small,
             THEME.TEXT_SECONDARY,
-            (width // 2, height - 34),
+            (width // 2, height - 28),
             anchor="center",
         )
 
@@ -642,19 +687,24 @@ class AimScreen:
         self.typo.draw_text(screen, "PINCH THUMB + INDEX FINGER TO SHOOT", self.typo.h2, THEME.TEXT_PRIMARY, (width // 2, height // 2 + 75), anchor="center")
 
     def _draw_paused(self, screen: pygame.Surface) -> None:
-        """Render pause overlay card."""
+        """Render clean, modern pause overlay card."""
         w, h = screen.get_size()
         overlay = pygame.Surface((w, h), pygame.SRCALPHA)
         overlay.fill((*THEME.BG_DARK, 210))
         screen.blit(overlay, (0, 0))
 
-        r = pygame.Rect(w // 2 - 200, h // 2 - 120, 400, 240)
+        r = pygame.Rect(w // 2 - 210, h // 2 - 130, 420, 260)
         draw_card(screen, r, THEME.BG_SURFACE, THEME.BORDER_FOCUS, border_width=2, border_radius=14)
 
-        self.typo.draw_text(screen, "GAME PAUSED", self.typo.h1, THEME.ACCENT_GOLD, (r.centerx, r.top + 40), anchor="center")
-        self.typo.draw_text(screen, "[ P / SPACE ] Resume", self.typo.body_bold, THEME.TEXT_PRIMARY, (r.centerx, r.top + 95), anchor="center")
-        self.typo.draw_text(screen, "[ R ] Restart Run", self.typo.body, THEME.TEXT_SECONDARY, (r.centerx, r.top + 130), anchor="center")
-        self.typo.draw_text(screen, "[ ESC / M ] Main Menu", self.typo.body, THEME.TEXT_SECONDARY, (r.centerx, r.top + 165), anchor="center")
+        self.typo.draw_text(screen, "GAME PAUSED", self.typo.h1, THEME.ACCENT_GOLD, (r.centerx, r.top + 32), anchor="center")
+        self.typo.draw_text(screen, "Game is paused", self.typo.body_small, THEME.TEXT_MUTED, (r.centerx, r.top + 62), anchor="center")
+
+        self.typo.draw_text(screen, "[ P / SPACE ] Resume", self.typo.body_bold, THEME.TEXT_PRIMARY, (r.centerx, r.top + 102), anchor="center")
+        self.typo.draw_text(screen, "[ R ] Restart Run", self.typo.body, THEME.TEXT_SECONDARY, (r.centerx, r.top + 136), anchor="center")
+        self.typo.draw_text(screen, "[ ESC / M ] Main Menu", self.typo.body, THEME.TEXT_SECONDARY, (r.centerx, r.top + 170), anchor="center")
+
+        # Gesture hint
+        self.typo.draw_text(screen, "Close palm or press ESC to resume", self.typo.caption, THEME.ACCENT_CYAN, (r.centerx, r.bottom - 22), anchor="center")
 
     def _draw_game_over(self, screen: pygame.Surface, now: float) -> None:
         """Render game results card with score breakdown."""
@@ -732,7 +782,7 @@ class AimScreen:
         self,
         screen: pygame.Surface,
         result: TrackingResult | None,
-        pinch_result: PinchResult | None,
+        gesture_result: GestureResult | None,
         now: float,
     ) -> None:
         """Render isolated, compact monospaced Debug Panel strictly below top HUD."""
@@ -770,7 +820,6 @@ class AimScreen:
         elif result is None:
             hand_text, hand_color = "HAND: starting...", THEME.TEXT_SECONDARY
         elif result.fresh and result.hand is not None:
-            tip = result.hand.index_tip_norm
             hand_text = f"HAND: tracked {result.hand.handedness} ({result.hand.score:.2f})"
             hand_color = THEME.ACCENT_EMERALD
         elif result.coasting and result.hand is not None:
@@ -778,6 +827,17 @@ class AimScreen:
             hand_color = THEME.ACCENT_GOLD
         else:
             hand_text, hand_color = "HAND: lost", THEME.ACCENT_CORAL
+
+        g_res = gesture_result or self._last_gesture
+        if g_res is not None:
+            g_text = f"GESTURE: {g_res.gesture.name.upper()} ({g_res.confirm_count}/{settings.GESTURE_CONFIRM_FRAMES})"
+            g_color = THEME.ACCENT_EMERALD if g_res.gesture is not HandGesture.NO_HAND else THEME.TEXT_MUTED
+            palm_val = g_res.palm_metric
+            palm_state = "CLOSED" if palm_val and palm_val <= settings.PALM_CLOSE_THRESHOLD else "OPEN"
+            palm_text = f"PALM: {palm_val:.2f} ({palm_state})" if palm_val is not None else "PALM: —"
+        else:
+            g_text, g_color = "GESTURE: —", THEME.TEXT_MUTED
+            palm_text = "PALM: —"
 
         raw_in = self._aim.raw_input
         filt_in = self._aim.filtered_input
@@ -794,22 +854,13 @@ class AimScreen:
         aim_x, aim_y = round(self._aim.position[0]), round(self._aim.position[1])
         aim_text = f"AIM PIXELS: x={aim_x}, y={aim_y}"
 
-        pinch = pinch_result or self._last_pinch
+        pinch = g_res.pinch_result if g_res else None
         dist_val = pinch.normalized_distance if pinch is not None else None
         if dist_val is not None:
             dist_status = "PINCH" if dist_val <= settings.PINCH_CLOSE_THRESHOLD else ("OPEN" if dist_val >= settings.PINCH_RELEASE_THRESHOLD else "MID")
             dist_text = f"PINCH: {dist_val:.2f} ({dist_status}) [{pinch.phase.name}]"
         else:
             dist_text = "PINCH: —"
-
-        if now < self._last_shot_display_until:
-            shot_text, shot_color = f"SHOT: FIRED! (#{self._game.stats.shots_fired})", THEME.ACCENT_GOLD
-        elif self._game.state is not GameState.PLAYING:
-            shot_text, shot_color = f"SHOT: blocked ({self._game.state.name})", THEME.TEXT_MUTED
-        elif pinch is not None and pinch.phase is PinchPhase.READY:
-            shot_text, shot_color = "SHOT: ready for pinch", THEME.TEXT_SECONDARY
-        else:
-            shot_text, shot_color = "SHOT: pinched / hold", THEME.ACCENT_PURPLE
 
         stats_text = f"LIVES: {self._game.stats.lives}  HITS: {self._game.stats.targets_hit}/{self._game.stats.shots_fired} ({self._game.stats.accuracy:.0f}%)"
 
@@ -818,11 +869,12 @@ class AimScreen:
             (cam_text, THEME.ACCENT_CYAN),
             (st_text, st_color),
             (hand_text, hand_color),
+            (g_text, g_color),
+            (palm_text, THEME.ACCENT_GOLD),
+            (dist_text, THEME.ACCENT_GOLD),
             (raw_text, THEME.TEXT_SECONDARY),
             (vel_text, THEME.ACCENT_PURPLE),
             (aim_text, THEME.TEXT_PRIMARY),
-            (dist_text, THEME.ACCENT_GOLD),
-            (shot_text, shot_color),
             (stats_text, THEME.ACCENT_CYAN),
         ]:
             self.typo.draw_text(screen, line, self.typo.monospace_debug, col, (r.left + 10, y), anchor="topleft")
