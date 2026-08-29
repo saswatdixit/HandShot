@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>HANDSHOT — Wireless Phone Camera</title>
+  <title>HANDSHOT — Secure Mobile Webcam</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -20,7 +20,7 @@
     }
     header {
       text-align: center;
-      margin-bottom: 14px;
+      margin-bottom: 12px;
     }
     h1 {
       font-size: 24px;
@@ -33,6 +33,32 @@
       color: #94a2b5;
       margin-top: 2px;
     }
+    .status-ribbon {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+      width: 100%;
+      max-width: 480px;
+    }
+    .ribbon-item {
+      flex: 1;
+      background: #121720;
+      border: 1px solid #202b3c;
+      border-radius: 8px;
+      padding: 6px 8px;
+      font-size: 11px;
+      text-align: center;
+      color: #94a2b5;
+    }
+    .ribbon-item strong {
+      display: block;
+      color: #f2f5fa;
+      font-size: 12px;
+      margin-top: 2px;
+    }
+    .ribbon-item .tag-ok { color: #5fe8a0; }
+    .ribbon-item .tag-warn { color: #f5b041; }
+    .ribbon-item .tag-err { color: #ff5860; }
     .video-card {
       width: 100%;
       max-width: 480px;
@@ -167,11 +193,6 @@
       border-color: #5ad7ff;
       color: #5ad7ff;
     }
-    button.danger {
-      background: #361a20;
-      border-color: #ff5860;
-      color: #ff5860;
-    }
     .info-card {
       width: 100%;
       max-width: 480px;
@@ -192,8 +213,23 @@
 <body>
   <header>
     <h1>HANDSHOT</h1>
-    <p class="subtitle">Wireless Mobile Webcam</p>
+    <p class="subtitle">Secure Mobile Webcam</p>
   </header>
+
+  <div class="status-ribbon">
+    <div class="ribbon-item">
+      <span>PROTOCOL</span>
+      <strong id="badge-secure" class="tag-ok">HTTPS (Secure)</strong>
+    </div>
+    <div class="ribbon-item">
+      <span>CAMERA API</span>
+      <strong id="badge-api" class="tag-ok">Available</strong>
+    </div>
+    <div class="ribbon-item">
+      <span>STATUS</span>
+      <strong id="badge-cam-status">Standby</strong>
+    </div>
+  </div>
 
   <div class="video-card">
     <div id="placeholder" class="placeholder-view">
@@ -201,7 +237,7 @@
         <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
         <circle cx="12" cy="13" r="4"/>
       </svg>
-      <p>Tap <strong>START CAMERA</strong> to begin streaming to your computer.</p>
+      <p>Tap <strong>START CAMERA</strong> to grant camera permission and begin streaming to your computer.</p>
     </div>
 
     <video id="webcam" playsinline autoplay muted style="display:none;"></video>
@@ -233,10 +269,12 @@
   </div>
 
   <div class="info-card">
-    <strong>Connection Info:</strong>
+    <strong>First Connection Notice:</strong>
+    <br>If your browser displayed a security notice, tap <em>Advanced / Show Details</em> and select <em>Proceed to Handshot local site</em>.
+    <br><br><strong>Stream Diagnostics:</strong>
     <br>• Camera: <span id="info-facing" style="color: #5ad7ff;">Rear (Environment)</span>
-    <br>• Stream Latency: <span id="latency-val" style="color: #5fe8a0;">~15 ms</span>
-    <br>• Make sure Phone & PC are on the <strong>same Wi-Fi network</strong>.
+    <br>• Latency: <span id="latency-val" style="color: #5fe8a0;">~15 ms</span>
+    <br>• Requirement: Phone & PC on <strong>same local Wi-Fi</strong>.
   </div>
 
   <canvas id="capture-canvas" style="display:none;"></canvas>
@@ -267,6 +305,26 @@
     const errTitle = document.getElementById("err-title");
     const errMsg = document.getElementById("err-msg");
     const btnRetry = document.getElementById("btn-retry");
+    const badgeSecure = document.getElementById("badge-secure");
+    const badgeApi = document.getElementById("badge-api");
+    const badgeCamStatus = document.getElementById("badge-cam-status");
+
+    // Check secure context on page load
+    if (window.isSecureContext) {
+      badgeSecure.textContent = "HTTPS (Secure)";
+      badgeSecure.className = "tag-ok";
+    } else {
+      badgeSecure.textContent = "Insecure Context";
+      badgeSecure.className = "tag-err";
+    }
+
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      badgeApi.textContent = "Available";
+      badgeApi.className = "tag-ok";
+    } else {
+      badgeApi.textContent = "Unavailable";
+      badgeApi.className = "tag-err";
+    }
 
     function showError(title, message) {
       errTitle.textContent = title;
@@ -274,6 +332,8 @@
       errorCard.style.display = "flex";
       statusDot.className = "dot error";
       statusText.textContent = "Error";
+      badgeCamStatus.textContent = "Error";
+      badgeCamStatus.className = "tag-err";
     }
 
     function hideError() {
@@ -284,6 +344,8 @@
       hideError();
       statusDot.className = "dot warn";
       statusText.textContent = "Opening Camera...";
+      badgeCamStatus.textContent = "Opening...";
+      badgeCamStatus.className = "tag-warn";
 
       if (currentStream) {
         currentStream.getTracks().forEach(track => track.stop());
@@ -293,7 +355,7 @@
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         showError(
           "Camera API Unavailable",
-          "Your mobile browser requires a secure context or permission. On Android Chrome, you can allow this LAN IP via chrome://flags ('Insecure origins treated as secure')."
+          "Camera API is disabled because the page is not in a secure context. Please make sure you opened the HTTPS link: " + window.location.href
         );
         return;
       }
@@ -301,7 +363,6 @@
       try {
         let stream = null;
         try {
-          // Attempt high-res capture with facingMode ideal
           stream = await navigator.mediaDevices.getUserMedia({
             video: {
               facingMode: { ideal: facingMode },
@@ -311,8 +372,7 @@
             audio: false
           });
         } catch (constraintErr) {
-          // Fallback to basic constraint
-          console.warn("Retrying with fallback constraint:", constraintErr);
+          console.warn("Retrying with fallback constraints:", constraintErr);
           stream = await navigator.mediaDevices.getUserMedia({
             video: { facingMode: facingMode },
             audio: false
@@ -335,6 +395,8 @@
         streamBtnText.textContent = "STOP STREAM";
         statusDot.className = "dot live";
         statusText.textContent = "Connected & Streaming";
+        badgeCamStatus.textContent = actualFacing;
+        badgeCamStatus.className = "tag-ok";
 
         startFrameLoop();
       } catch (err) {
@@ -363,6 +425,8 @@
       streamBtnText.textContent = "START CAMERA";
       statusDot.className = "dot";
       statusText.textContent = "Standby";
+      badgeCamStatus.textContent = "Standby";
+      badgeCamStatus.className = "";
       fpsCounter.textContent = "0 FPS";
     }
 

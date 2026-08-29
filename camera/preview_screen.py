@@ -464,11 +464,11 @@ class CameraPreviewScreen:
             stat_txt = f"● PHONE CONNECTED • STREAMING ({fps_val:.0f} FPS) • {facing}"
             stat_col = THEME.ACCENT_EMERALD
         else:
-            stat_txt = "● SERVER READY  •  ○ WAITING FOR PHONE"
+            stat_txt = "● SECURE HTTPS SERVER READY  •  ○ WAITING FOR PHONE"
             stat_col = THEME.ACCENT_GOLD
 
         self.typo.draw_text(screen, stat_txt, self.typo.body_bold, stat_col, (r.centerx, url_y + 30), anchor="center")
-        self.typo.draw_text(screen, "Both devices must be on the same Wi-Fi network", self.typo.body_small, THEME.TEXT_MUTED, (r.centerx, url_y + 52), anchor="center")
+        self.typo.draw_text(screen, "First connection: Tap 'Advanced' / 'Show Details' to proceed on phone", self.typo.body_small, THEME.TEXT_MUTED, (r.centerx, url_y + 52), anchor="center")
 
         self.typo.draw_text(
             screen,

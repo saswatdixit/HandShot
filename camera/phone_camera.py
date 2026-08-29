@@ -12,17 +12,17 @@ from config import settings
 
 
 class PhoneCameraSource(CameraSource):
-    """Encapsulates wireless mobile phone camera streaming over local network."""
+    """Encapsulates wireless mobile phone camera streaming over local HTTPS network."""
 
     def __init__(
         self,
-        port: int = 8088,
+        port: int = 8443,
         mirror: bool = False,
         server: PhoneStreamServer | None = None,
     ) -> None:
         if server is not None:
             self.server = server
-        elif port != 8088:
+        elif port != 8443:
             self.server = PhoneStreamServer(port=port)
         else:
             self.server = PhoneStreamServer.get_instance(port=port)

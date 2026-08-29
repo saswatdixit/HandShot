@@ -93,19 +93,19 @@ class CameraSourceTests(unittest.TestCase):
         self.assertFalse(mock.is_connected)
 
     def test_phone_camera_source_instantiation(self) -> None:
-        phone_src = PhoneCameraSource(port=9099)
+        phone_src = PhoneCameraSource(port=9443)
         self.assertEqual(phone_src.source_type, CameraSourceType.PHONE)
-        self.assertIn("http://", phone_src.pairing_url)
-        self.assertIn(":9099", phone_src.pairing_url)
+        self.assertIn("https://", phone_src.pairing_url)
+        self.assertIn(":9443", phone_src.pairing_url)
         self.assertFalse(phone_src.is_connected)
 
     def test_camera_manager_phone_server_integration(self) -> None:
         mock = MockCameraSource()
         manager = CameraManager(source=mock)
         try:
-            # pairing_url should guarantee server is listening
+            # pairing_url should guarantee server is listening over HTTPS
             url = manager.pairing_url
-            self.assertIn("http://", url)
+            self.assertIn("https://", url)
             self.assertTrue(manager.phone_server.is_running)
         finally:
             manager.release()

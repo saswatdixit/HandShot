@@ -1,10 +1,11 @@
-"""High-performance, low-latency LAN HTTP phone streaming server for HANDSHOT (Phase 13)."""
+"""High-performance, low-latency LAN HTTPS phone streaming server for HANDSHOT (Phase 13)."""
 
 from __future__ import annotations
 
 import http.server
 import json
 import socket
+import ssl
 import threading
 import time
 from pathlib import Path
@@ -12,6 +13,8 @@ from typing import TYPE_CHECKING
 
 import cv2
 import numpy as np
+
+from camera.cert_manager import ensure_dev_certificate
 
 if TYPE_CHECKING:
     pass
@@ -50,19 +53,19 @@ def get_lan_ip() -> str:
 
 
 class PhoneStreamServer:
-    """Manages local HTTP web app serving and real-time mobile frame ingestion."""
+    """Manages local HTTPS web app serving and real-time mobile frame ingestion."""
 
     _instance: PhoneStreamServer | None = None
     _instance_lock = threading.Lock()
 
     @classmethod
-    def get_instance(cls, port: int = 8088) -> PhoneStreamServer:
+    def get_instance(cls, port: int = 8443) -> PhoneStreamServer:
         with cls._instance_lock:
             if cls._instance is None:
                 cls._instance = PhoneStreamServer(port=port)
             return cls._instance
 
-    def __init__(self, port: int = 8088) -> None:
+    def __init__(self, port: int = 8443) -> None:
         self.preferred_port = port
         self.port = port
         self.lan_ip = get_lan_ip()
@@ -89,23 +92,29 @@ class PhoneStreamServer:
 
     @property
     def pairing_url(self) -> str:
-        return f"http://{self.lan_ip}:{self.port}/"
+        return f"https://{self.lan_ip}:{self.port}/"
 
     @property
     def is_connected(self) -> bool:
         return (time.perf_counter() - self.last_frame_time) < 3.0
 
     def start(self, print_banner: bool = True) -> None:
-        """Start the HTTP server on 0.0.0.0 if not already running."""
+        """Start the HTTPS server on 0.0.0.0 if not already running."""
         with self._lock:
             if self._running and self._server is not None:
                 return
 
             self.lan_ip = get_lan_ip()
+            cert_file, key_file = ensure_dev_certificate(self.lan_ip)
+
             bound = False
             for p in range(self.preferred_port, self.preferred_port + 20):
                 try:
                     server = http.server.ThreadingHTTPServer(("0.0.0.0", p), self._make_handler())
+                    ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                    ssl_ctx.load_cert_chain(certfile=str(cert_file), keyfile=str(key_file))
+                    server.socket = ssl_ctx.wrap_socket(server.socket, server_side=True)
+
                     self.port = p
                     self._server = server
                     bound = True
@@ -115,27 +124,28 @@ class PhoneStreamServer:
 
             if not bound or self._server is None:
                 raise RuntimeError(
-                    f"Could not bind phone streaming server to ports {self.preferred_port}..{self.preferred_port+20}. "
+                    f"Could not bind secure phone streaming server to ports {self.preferred_port}..{self.preferred_port+20}. "
                     f"Check that no other application is blocking port {self.preferred_port}."
                 )
 
             self._running = True
-            self._thread = threading.Thread(target=self._server.serve_forever, daemon=True, name="PhoneStreamHTTPServer")
+            self._thread = threading.Thread(target=self._server.serve_forever, daemon=True, name="PhoneStreamHTTPSServer")
             self._thread.start()
 
             if print_banner and not self._banner_printed:
                 self._banner_printed = True
                 print("\n" + "=" * 62)
-                print("  HANDSHOT WIRELESS PHONE CAMERA SERVER ACTIVE")
+                print("  HANDSHOT SECURE HTTPS PHONE CAMERA SERVER ACTIVE")
                 print("=" * 62)
-                print(f"  Server Status      : RUNNING (0.0.0.0:{self.port})")
+                print(f"  Server Status      : RUNNING (0.0.0.0:{self.port} HTTPS)")
                 print(f"  Webcam Pairing URL : {self.pairing_url}")
-                print(f"  Health Check       : http://{self.lan_ip}:{self.port}/health")
+                print(f"  Health Check       : https://{self.lan_ip}:{self.port}/health")
+                print("  Secure Context     : ENABLED (Camera API Unlocked)")
                 print("  Requirement        : Phone & PC must be on SAME Wi-Fi")
                 print("=" * 62 + "\n")
 
     def stop(self) -> None:
-        """Stop the HTTP server cleanly."""
+        """Stop the HTTPS server cleanly."""
         with self._lock:
             self._running = False
             if self._server is not None:
@@ -185,9 +195,11 @@ class PhoneStreamServer:
                     data = json.dumps({
                         "status": "ok",
                         "service": "handshot-phone-camera",
+                        "protocol": "https",
                         "lan_ip": server_inst.lan_ip,
                         "port": server_inst.port,
                         "listening_on": f"0.0.0.0:{server_inst.port}",
+                        "secure_context": True,
                         "connected": server_inst.is_connected,
                         "fps": round(server_inst.measured_fps, 1),
                         "frames_received": server_inst.frames_received,
