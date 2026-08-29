@@ -9,6 +9,8 @@ class Typography:
     """Scalable typography system with system font fallbacks and bounding-box measurements."""
 
     def __init__(self, screen_size: tuple[int, int] = (1280, 720)) -> None:
+        if not pygame.font.get_init():
+            pygame.font.init()
         self.screen_size = screen_size
         self._cache: dict[tuple[str, int, bool], pygame.font.Font] = {}
         self._update_fonts()

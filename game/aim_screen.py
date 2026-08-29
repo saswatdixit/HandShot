@@ -67,6 +67,10 @@ class AimScreen:
         tracker: HandTracker | None,
         debug_hud: bool = False,
     ) -> None:
+        if not pygame.get_init():
+            pygame.init()
+        if not pygame.font.get_init():
+            pygame.font.init()
         self.camera = camera
         self.tracker = tracker
         self._aim = AimController(
