@@ -18,11 +18,11 @@
     }
     header {
       text-align: center;
-      margin-bottom: 14px;
+      margin-bottom: 12px;
     }
     h1 {
-      font-size: 22px;
-      font-weight: 700;
+      font-size: 24px;
+      font-weight: 800;
       letter-spacing: 1px;
       color: #5ad7ff;
     }
@@ -33,17 +33,17 @@
     }
     .video-card {
       width: 100%;
-      max-width: 480px;
+      max-width: 460px;
       background: #121720;
-      border: 1px solid #202b3c;
-      border-radius: 14px;
+      border: 1px solid #243248;
+      border-radius: 16px;
       overflow: hidden;
       position: relative;
       aspect-ratio: 4 / 3;
       display: flex;
       align-items: center;
       justify-content: center;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
     }
     video {
       width: 100%;
@@ -54,15 +54,15 @@
       position: absolute;
       top: 12px;
       left: 12px;
-      background: rgba(10, 13, 18, 0.85);
-      border: 1px solid #2a374c;
+      background: rgba(10, 13, 18, 0.88);
+      border: 1px solid #2a3a52;
       border-radius: 20px;
-      padding: 4px 10px;
+      padding: 5px 12px;
       font-size: 12px;
       font-weight: 600;
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 7px;
       backdrop-filter: blur(8px);
     }
     .dot {
@@ -77,22 +77,46 @@
       position: absolute;
       top: 12px;
       right: 12px;
-      background: rgba(10, 13, 18, 0.85);
-      border: 1px solid #2a374c;
+      background: rgba(10, 13, 18, 0.88);
+      border: 1px solid #2a3a52;
       border-radius: 20px;
-      padding: 4px 10px;
+      padding: 5px 12px;
       font-size: 12px;
       color: #5ad7ff;
       font-family: monospace;
+      font-weight: 600;
       backdrop-filter: blur(8px);
+    }
+    .error-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(12, 16, 24, 0.95);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      text-align: center;
+      z-index: 10;
+    }
+    .error-overlay h3 {
+      color: #ff5860;
+      font-size: 17px;
+      margin-bottom: 8px;
+    }
+    .error-overlay p {
+      color: #94a2b5;
+      font-size: 13px;
+      line-height: 1.5;
+      margin-bottom: 16px;
     }
     .controls {
       width: 100%;
-      max-width: 480px;
+      max-width: 460px;
       margin-top: 16px;
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 10px;
     }
     .btn-row {
       display: flex;
@@ -100,12 +124,12 @@
     }
     button {
       flex: 1;
-      padding: 13px 16px;
+      padding: 14px 16px;
       font-size: 14px;
-      font-weight: 600;
-      border-radius: 10px;
+      font-weight: 700;
+      border-radius: 12px;
       border: 1px solid #344660;
-      background: #182230;
+      background: #182434;
       color: #f2f5fa;
       cursor: pointer;
       display: flex;
@@ -123,21 +147,26 @@
       border-color: #5ad7ff;
     }
     button.active {
-      background: #24354a;
+      background: #1c3348;
       border-color: #5ad7ff;
       color: #5ad7ff;
     }
+    button.danger {
+      background: #361a20;
+      border-color: #ff5860;
+      color: #ff5860;
+    }
     .info-card {
       width: 100%;
-      max-width: 480px;
+      max-width: 460px;
       background: #121720;
       border: 1px solid #202b3c;
-      border-radius: 10px;
-      padding: 12px 14px;
+      border-radius: 12px;
+      padding: 14px 16px;
       margin-top: 14px;
       font-size: 12px;
       color: #94a2b5;
-      line-height: 1.5;
+      line-height: 1.6;
     }
     .info-card strong {
       color: #f2f5fa;
@@ -147,42 +176,50 @@
 <body>
   <header>
     <h1>HANDSHOT</h1>
-    <p class="subtitle">Mobile Webcam Streamer</p>
+    <p class="subtitle">Wireless Mobile Webcam</p>
   </header>
 
   <div class="video-card">
     <video id="webcam" playsinline autoplay muted></video>
+
     <div class="status-badge">
       <div id="status-dot" class="dot"></div>
-      <span id="status-text">Standby</span>
+      <span id="status-text">Starting Camera...</span>
     </div>
+
     <div id="fps-counter" class="fps-badge">0 FPS</div>
+
+    <div id="error-card" class="error-overlay">
+      <h3 id="err-title">Camera Access Denied</h3>
+      <p id="err-msg">Please allow camera access in your browser settings to use your phone as a webcam.</p>
+      <button id="btn-retry" class="primary" style="padding: 10px 20px;">Try Again</button>
+    </div>
   </div>
 
   <div class="controls">
     <div class="btn-row">
       <button id="btn-toggle-cam">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 7h-4l-2-3H10L8 7H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V9c0-1.1-.9-2-2-2z"/><circle cx="12" cy="13" r="4"/></svg>
-        <span id="cam-facing-text">Rear Camera</span>
+        <span id="cam-facing-text">Switch Camera</span>
       </button>
       <button id="btn-stream" class="primary">
-        <span id="stream-btn-text">Start Stream</span>
+        <span id="stream-btn-text">Start Streaming</span>
       </button>
     </div>
   </div>
 
   <div class="info-card">
-    <strong>Tips for Best Tracking:</strong>
-    <br>• Hold the camera steady facing your hand.
-    <br>• Keep your hand in good lighting.
-    <br>• Stream latency: <span id="latency-val" style="color: #5fe8a0;">~15 ms</span>.
+    <strong>Connection Info:</strong>
+    <br>• Camera: <span id="info-facing" style="color: #5ad7ff;">Rear (Environment)</span>
+    <br>• Latency: <span id="latency-val" style="color: #5fe8a0;">~15 ms</span>
+    <br>• Hold phone steadily aimed at your index finger.
   </div>
 
   <canvas id="capture-canvas" style="display:none;"></canvas>
 
   <script>
     let currentStream = null;
-    let facingMode = "environment"; // "environment" (rear) or "user" (front)
+    let facingMode = "environment"; // "environment" or "user"
     let isStreaming = false;
     let inFlight = false;
     let frameCount = 0;
@@ -198,54 +235,109 @@
     const streamBtnText = document.getElementById("stream-btn-text");
     const btnToggleCam = document.getElementById("btn-toggle-cam");
     const camFacingText = document.getElementById("cam-facing-text");
+    const infoFacing = document.getElementById("info-facing");
     const latencyVal = document.getElementById("latency-val");
+    const errorCard = document.getElementById("error-card");
+    const errTitle = document.getElementById("err-title");
+    const errMsg = document.getElementById("err-msg");
+    const btnRetry = document.getElementById("btn-retry");
+
+    function showError(title, message) {
+      errTitle.textContent = title;
+      errMsg.textContent = message;
+      errorCard.style.display = "flex";
+      statusDot.className = "dot error";
+      statusText.textContent = "Error";
+    }
+
+    function hideError() {
+      errorCard.style.display = "none";
+    }
 
     async function initCamera() {
+      hideError();
+      statusDot.className = "dot";
+      statusText.textContent = "Requesting Access...";
+
       if (currentStream) {
         currentStream.getTracks().forEach(track => track.stop());
+        currentStream = null;
       }
+
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        showError(
+          "Browser Incompatible",
+          "Your mobile browser does not support standard camera streaming. Please open in Chrome or Safari."
+        );
+        return;
+      }
+
       try {
         const constraints = {
           video: {
             facingMode: { ideal: facingMode },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-            frameRate: { ideal: 30 }
+            width: { ideal: 1280, max: 1920 },
+            height: { ideal: 720, max: 1080 }
           },
           audio: false
         };
         currentStream = await navigator.mediaDevices.getUserMedia(constraints);
         video.srcObject = currentStream;
         await video.play();
+
+        const actualFacing = (facingMode === "environment") ? "Rear Camera" : "Front Camera";
+        camFacingText.textContent = actualFacing;
+        infoFacing.textContent = actualFacing;
         statusDot.className = "dot";
         statusText.textContent = "Ready (" + (facingMode === "environment" ? "Rear" : "Front") + ")";
+
+        // Auto-start streaming on successful camera launch
+        if (!isStreaming) {
+          startStreaming();
+        }
       } catch (err) {
-        console.error("Camera access failed:", err);
-        statusDot.className = "dot error";
-        statusText.textContent = "Camera Error";
+        console.error("Camera access error:", err);
+        if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+          showError("Camera Access Denied", "Please tap 'Allow' when your browser asks for camera permission, or check your site settings.");
+        } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
+          showError("No Camera Found", "No working camera hardware was detected on this device.");
+        } else {
+          showError("Camera Error", err.message || "Failed to initialize video stream.");
+        }
       }
     }
 
+    btnRetry.addEventListener("click", () => {
+      initCamera();
+    });
+
     btnToggleCam.addEventListener("click", async () => {
       facingMode = (facingMode === "environment") ? "user" : "environment";
-      camFacingText.textContent = (facingMode === "environment") ? "Rear Camera" : "Front Camera";
       await initCamera();
     });
 
+    function startStreaming() {
+      isStreaming = true;
+      btnStream.className = "active";
+      streamBtnText.textContent = "Pause Streaming";
+      statusDot.className = "dot live";
+      statusText.textContent = "Streaming Live";
+      startFrameLoop();
+    }
+
+    function pauseStreaming() {
+      isStreaming = false;
+      btnStream.className = "primary";
+      streamBtnText.textContent = "Start Streaming";
+      statusDot.className = "dot";
+      statusText.textContent = "Paused";
+    }
+
     btnStream.addEventListener("click", () => {
       if (!isStreaming) {
-        isStreaming = true;
-        btnStream.className = "active";
-        streamBtnText.textContent = "Pause Stream";
-        statusDot.className = "dot live";
-        statusText.textContent = "Streaming Live";
-        startFrameLoop();
+        startStreaming();
       } else {
-        isStreaming = false;
-        btnStream.className = "primary";
-        streamBtnText.textContent = "Resume Stream";
-        statusDot.className = "dot";
-        statusText.textContent = "Paused";
+        pauseStreaming();
       }
     });
 
@@ -279,7 +371,7 @@
           latencyVal.textContent = `~${roundTrip} ms`;
           frameCount++;
         } catch (e) {
-          // Ignore dropped post
+          // Network hiccup - ignore dropped frame
         } finally {
           inFlight = false;
         }

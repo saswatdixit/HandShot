@@ -347,10 +347,9 @@ def cmd_snapshot(args: argparse.Namespace) -> int:
 
 
 def run_preview(args: argparse.Namespace) -> int:
-    """Interactive UI & Camera Setup Development Preview with live screen cycling."""
+    """Real-time Camera & Hand Tracking Laboratory (Phase 13)."""
     try:
-        from game.aim_screen import AimScreen
-        from game.bubble_game import GameState
+        from camera.preview_screen import CameraPreviewScreen
     except ModuleNotFoundError as exc:
         if exc.name != "pygame":
             raise
@@ -359,13 +358,11 @@ def run_preview(args: argparse.Namespace) -> int:
 
     camera = open_camera(args)
     tracker = create_tracker(args)
-    print("HANDSHOT UI & Camera Preview:")
-    print("Keys: [1] Select  [2] Camera Setup  [3] Ready  [4] Countdown  [5] Playing  [6] Paused  [7] Results")
-    print("      [Left/Right] Cycle screens  [W] Toggle Camera  [D] Toggle Debug HUD  [ESC] Exit")
+    print("HANDSHOT Camera & Tracking Laboratory:")
+    print("Controls: [W] Switch Camera  [C] Mirror  [L] Landmarks  [D] Diagnostics  [S] Setup/QR  [ESC] Exit")
 
     try:
-        screen_app = AimScreen(camera, tracker, debug_hud=args.debug_gestures)
-        screen_app._game.state = GameState.CAMERA_SELECT
+        screen_app = CameraPreviewScreen(camera, tracker, debug_hud=args.debug_gestures or True)
         return screen_app.run(args.duration)
     finally:
         if tracker is not None:
