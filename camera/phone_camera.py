@@ -1,4 +1,4 @@
-"""Mobile webcam phone stream source for HANDSHOT (Phase 12)."""
+"""Mobile webcam phone stream source for HANDSHOT (Phase 13)."""
 
 from __future__ import annotations
 
@@ -18,8 +18,15 @@ class PhoneCameraSource(CameraSource):
         self,
         port: int = 8088,
         mirror: bool = False,
+        server: PhoneStreamServer | None = None,
     ) -> None:
-        self.server = PhoneStreamServer(port=port)
+        if server is not None:
+            self.server = server
+        elif port != 8088:
+            self.server = PhoneStreamServer(port=port)
+        else:
+            self.server = PhoneStreamServer.get_instance(port=port)
+
         self._mirror = mirror
         self._last_sequence = 0
         self._width = settings.CAMERA_WIDTH
@@ -91,7 +98,7 @@ class PhoneCameraSource(CameraSource):
         return frame
 
     def release(self) -> None:
-        self.server.stop()
+        pass
 
     def toggle_mirror(self) -> bool:
         self._mirror = not self._mirror

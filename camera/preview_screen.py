@@ -63,6 +63,7 @@ class CameraPreviewScreen:
         self._debug_hud = debug_hud
         self._show_landmarks = True
         self._show_camera_setup = False
+        self.camera.ensure_phone_server_started()
 
         self.layout = UILayout((settings.GAME_WIDTH, settings.GAME_HEIGHT))
         self.typo = Typography((settings.GAME_WIDTH, settings.GAME_HEIGHT))
@@ -441,7 +442,8 @@ class CameraPreviewScreen:
 
         self.typo.draw_text(screen, "PHONE WEBCAM SETUP", self.typo.h1, THEME.ACCENT_CYAN, (r.centerx, r.top + 24), anchor="center")
 
-        url = self.camera.pairing_url or f"http://{self.camera.phone_source.server.lan_ip if self.camera.phone_source else '127.0.0.1'}:8088/"
+        # Guarantee server is running and get live URL
+        url = self.camera.pairing_url
         if self._qr_surface is None or self._cached_qr_url != url:
             self._qr_surface = QRCode(url).to_surface(module_size=6, quiet_zone=4, bg_color=(255, 255, 255), fg_color=(0, 0, 0))
             self._cached_qr_url = url
@@ -455,10 +457,11 @@ class CameraPreviewScreen:
         self.typo.draw_text(screen, url, self.typo.h2, THEME.ACCENT_CYAN, (r.centerx, url_y), anchor="center")
 
         # Connection Status
-        phone_conn = (self.camera.is_phone and self.camera.source.is_connected)
+        phone_conn = (self.camera.is_phone and self.camera.source.is_connected) or self.camera.phone_server.is_connected
         if phone_conn:
-            facing = getattr(self.camera.source, "facing_mode", "environment").upper()
-            stat_txt = f"● PHONE CONNECTED • STREAMING ({self.camera.measured_fps:.0f} FPS) • {facing}"
+            facing = self.camera.phone_server.facing_mode.upper()
+            fps_val = self.camera.phone_server.measured_fps
+            stat_txt = f"● PHONE CONNECTED • STREAMING ({fps_val:.0f} FPS) • {facing}"
             stat_col = THEME.ACCENT_EMERALD
         else:
             stat_txt = "● SERVER READY  •  ○ WAITING FOR PHONE"

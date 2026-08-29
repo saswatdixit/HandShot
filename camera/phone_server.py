@@ -21,7 +21,7 @@ HTML_PATH = Path(__file__).parent / "web" / "phone_camera.html"
 
 def get_lan_ip() -> str:
     """Dynamically determine the host computer's active local network LAN IP."""
-    # Strategy 1: Connect UDP socket to gateway (no packet sent, determines route interface)
+    # Strategy 1: Connect UDP socket to public gateway (determines outbound routing interface)
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.settimeout(0.2)
@@ -33,11 +33,10 @@ def get_lan_ip() -> str:
     except Exception:
         pass
 
-    # Strategy 2: Probe local hostname addresses
+    # Strategy 2: Probe local hostname addresses prioritizing private LAN subnets
     try:
         hostname = socket.gethostname()
         candidates = socket.gethostbyname_ex(hostname)[2]
-        # Prioritize standard LAN subnets (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
         for ip in candidates:
             if ip.startswith("192.168.") or ip.startswith("10."):
                 return ip
@@ -53,6 +52,16 @@ def get_lan_ip() -> str:
 class PhoneStreamServer:
     """Manages local HTTP web app serving and real-time mobile frame ingestion."""
 
+    _instance: PhoneStreamServer | None = None
+    _instance_lock = threading.Lock()
+
+    @classmethod
+    def get_instance(cls, port: int = 8088) -> PhoneStreamServer:
+        with cls._instance_lock:
+            if cls._instance is None:
+                cls._instance = PhoneStreamServer(port=port)
+            return cls._instance
+
     def __init__(self, port: int = 8088) -> None:
         self.preferred_port = port
         self.port = port
@@ -60,6 +69,7 @@ class PhoneStreamServer:
         self._server: http.server.ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
         self._running = False
+        self._banner_printed = False
 
         # Ingested Frame State (Single-slot latest-frame-wins)
         self._lock = threading.Lock()
@@ -74,6 +84,10 @@ class PhoneStreamServer:
         self._fps_frame_count = 0
 
     @property
+    def is_running(self) -> bool:
+        return self._running and self._server is not None
+
+    @property
     def pairing_url(self) -> str:
         return f"http://{self.lan_ip}:{self.port}/"
 
@@ -81,52 +95,63 @@ class PhoneStreamServer:
     def is_connected(self) -> bool:
         return (time.perf_counter() - self.last_frame_time) < 3.0
 
-    def start(self) -> None:
-        if self._running:
-            return
+    def start(self, print_banner: bool = True) -> None:
+        """Start the HTTP server on 0.0.0.0 if not already running."""
+        with self._lock:
+            if self._running and self._server is not None:
+                return
 
-        # Refresh LAN IP on start
-        self.lan_ip = get_lan_ip()
+            self.lan_ip = get_lan_ip()
+            bound = False
+            for p in range(self.preferred_port, self.preferred_port + 20):
+                try:
+                    server = http.server.ThreadingHTTPServer(("0.0.0.0", p), self._make_handler())
+                    self.port = p
+                    self._server = server
+                    bound = True
+                    break
+                except OSError:
+                    continue
 
-        # Attempt binding to preferred port, scanning upwards on collision
-        bound = False
-        for p in range(self.preferred_port, self.preferred_port + 20):
-            try:
-                server = http.server.ThreadingHTTPServer(("0.0.0.0", p), self._make_handler())
-                self.port = p
-                self._server = server
-                bound = True
-                break
-            except OSError:
-                continue
+            if not bound or self._server is None:
+                raise RuntimeError(
+                    f"Could not bind phone streaming server to ports {self.preferred_port}..{self.preferred_port+20}. "
+                    f"Check that no other application is blocking port {self.preferred_port}."
+                )
 
-        if not bound or self._server is None:
-            raise RuntimeError(
-                f"Could not bind phone streaming server to ports {self.preferred_port}..{self.preferred_port+20}"
-            )
+            self._running = True
+            self._thread = threading.Thread(target=self._server.serve_forever, daemon=True, name="PhoneStreamHTTPServer")
+            self._thread.start()
 
-        self._running = True
-        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
-        self._thread.start()
-
-        # Print prominent terminal banner for debugging
-        print("\n" + "=" * 62)
-        print("  HANDSHOT WIRELESS PHONE CAMERA SERVER ACTIVE")
-        print("=" * 62)
-        print(f"  Webcam Pairing URL : {self.pairing_url}")
-        print(f"  Health Check       : http://{self.lan_ip}:{self.port}/health")
-        print("  Requirement        : Phone & PC must be on SAME Wi-Fi")
-        print("=" * 62 + "\n")
+            if print_banner and not self._banner_printed:
+                self._banner_printed = True
+                print("\n" + "=" * 62)
+                print("  HANDSHOT WIRELESS PHONE CAMERA SERVER ACTIVE")
+                print("=" * 62)
+                print(f"  Server Status      : RUNNING (0.0.0.0:{self.port})")
+                print(f"  Webcam Pairing URL : {self.pairing_url}")
+                print(f"  Health Check       : http://{self.lan_ip}:{self.port}/health")
+                print("  Requirement        : Phone & PC must be on SAME Wi-Fi")
+                print("=" * 62 + "\n")
 
     def stop(self) -> None:
-        self._running = False
-        if self._server is not None:
-            self._server.shutdown()
-            self._server.server_close()
-            self._server = None
-        if self._thread is not None:
-            self._thread.join(timeout=1.0)
-            self._thread = None
+        """Stop the HTTP server cleanly."""
+        with self._lock:
+            self._running = False
+            if self._server is not None:
+                try:
+                    self._server.shutdown()
+                    self._server.server_close()
+                except Exception:
+                    pass
+                self._server = None
+            if self._thread is not None:
+                try:
+                    self._thread.join(timeout=1.0)
+                except Exception:
+                    pass
+                self._thread = None
+            self._banner_printed = False
 
     def get_latest_frame(self) -> tuple[np.ndarray | None, int]:
         """Return (frame, sequence_id) for latest received mobile camera frame."""
@@ -140,7 +165,7 @@ class PhoneStreamServer:
 
         class StreamHandler(http.server.BaseHTTPRequestHandler):
             def log_message(self, format: str, *args) -> None:
-                # Silence normal HTTP request logs to keep terminal clean
+                # Silence normal HTTP request logs to keep console output clean
                 pass
 
             def do_GET(self) -> None:
@@ -162,9 +187,12 @@ class PhoneStreamServer:
                         "service": "handshot-phone-camera",
                         "lan_ip": server_inst.lan_ip,
                         "port": server_inst.port,
+                        "listening_on": f"0.0.0.0:{server_inst.port}",
                         "connected": server_inst.is_connected,
                         "fps": round(server_inst.measured_fps, 1),
                         "frames_received": server_inst.frames_received,
+                        "facing_mode": server_inst.facing_mode,
+                        "client_ip": server_inst.client_ip,
                     }).encode("utf-8")
                     self.send_response(200)
                     self.send_header("Content-Type", "application/json")

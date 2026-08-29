@@ -1,4 +1,4 @@
-"""Unified Camera Manager supporting local USB/built-in webcams and wireless phone cameras (Phase 12)."""
+"""Unified Camera Manager supporting local USB/built-in webcams and wireless phone cameras (Phase 13)."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from camera.local_camera import (
     LocalCameraSource,
 )
 from camera.phone_camera import PhoneCameraSource
+from camera.phone_server import PhoneStreamServer
 from config import settings
 
 if TYPE_CHECKING:
@@ -40,6 +41,8 @@ class CameraManager:
         self._req_mirror = mirror
         self._backend = backend
         self.threaded = threaded
+        self._phone_server = PhoneStreamServer.get_instance(port=8088)
+        self.ensure_phone_server_started()
 
         if source is not None:
             self._source: CameraSource = source
@@ -72,10 +75,19 @@ class CameraManager:
         return None
 
     @property
-    def pairing_url(self) -> str | None:
-        if isinstance(self._source, PhoneCameraSource):
-            return self._source.pairing_url
-        return None
+    def phone_server(self) -> PhoneStreamServer:
+        return self._phone_server
+
+    @property
+    def pairing_url(self) -> str:
+        """Return live pairing URL, ensuring the HTTP server is actively listening on 0.0.0.0."""
+        self.ensure_phone_server_started()
+        return self._phone_server.pairing_url
+
+    def ensure_phone_server_started(self) -> None:
+        """Guarantee that the phone streaming server is active and listening."""
+        if not self._phone_server.is_running:
+            self._phone_server.start()
 
     @property
     def index(self) -> int:
@@ -135,6 +147,8 @@ class CameraManager:
 
     def release(self) -> None:
         self._source.release()
+        if self._phone_server.is_running:
+            self._phone_server.stop()
 
     def toggle_mirror(self) -> bool:
         return self._source.toggle_mirror()
@@ -171,7 +185,7 @@ class CameraManager:
             return
         old_mirror = self._source.mirror
         self._source.release()
-        self._source = PhoneCameraSource(port=port, mirror=old_mirror)
+        self._source = PhoneCameraSource(port=port, mirror=old_mirror, server=self._phone_server)
         self._source.open()
 
     @staticmethod

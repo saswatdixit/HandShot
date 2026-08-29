@@ -99,6 +99,18 @@ class CameraSourceTests(unittest.TestCase):
         self.assertIn(":9099", phone_src.pairing_url)
         self.assertFalse(phone_src.is_connected)
 
+    def test_camera_manager_phone_server_integration(self) -> None:
+        mock = MockCameraSource()
+        manager = CameraManager(source=mock)
+        try:
+            # pairing_url should guarantee server is listening
+            url = manager.pairing_url
+            self.assertIn("http://", url)
+            self.assertTrue(manager.phone_server.is_running)
+        finally:
+            manager.release()
+            self.assertFalse(manager.phone_server.is_running)
+
 
 if __name__ == "__main__":
     unittest.main()
