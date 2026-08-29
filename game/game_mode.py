@@ -1,4 +1,4 @@
-"""Game mode definitions and configurations for HANDSHOT (Phase 10.5). Zero emoji dependencies."""
+"""Game mode definitions and configurations for HANDSHOT."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ class GameMode(Enum):
     """Supported game modes for HANDSHOT."""
 
     CLASSIC = auto()
+    ARCADE = auto()
     CHILL = auto()
     TIMED = auto()
     PRACTICE = auto()
@@ -25,7 +26,7 @@ class ModeConfig:
 
     mode: GameMode = GameMode.CLASSIC
     name: str = "CLASSIC"
-    tagline: str = "Arcade survival. 3 lives. Increasing difficulty."
+    tagline: str = "3 Lives • Progressive difficulty arcade challenge"
     badge: str = "CLASSIC"
     initial_lives: int = settings.INITIAL_LIVES
     time_limit_seconds: float | None = None
@@ -42,15 +43,16 @@ class ModeConfig:
     allow_life_loss: bool = True
     allow_combo: bool = True
     difficulty_scaling: bool = True
+    infinite_ammo: bool = False
     theme_music_track: str = "classic"
 
 
 def get_classic_mode() -> ModeConfig:
-    """Standard 3-life arcade mode with progressive difficulty."""
+    """Standard 3-life arcade mode with reload mechanics and progressive difficulty."""
     return ModeConfig(
         mode=GameMode.CLASSIC,
         name="CLASSIC",
-        tagline="3 Lives • Progressive difficulty arcade challenge",
+        tagline="3 Lives • Limited magazine with infinite reserves",
         badge="CLASSIC",
         initial_lives=settings.INITIAL_LIVES,
         time_limit_seconds=None,
@@ -67,6 +69,34 @@ def get_classic_mode() -> ModeConfig:
         allow_life_loss=True,
         allow_combo=True,
         difficulty_scaling=True,
+        infinite_ammo=False,
+        theme_music_track="classic",
+    )
+
+
+def get_arcade_mode() -> ModeConfig:
+    """Infinite ammo casual mode: zero reloads, pure tracking and shooting."""
+    return ModeConfig(
+        mode=GameMode.ARCADE,
+        name="ARCADE",
+        tagline="Infinite Ammo • No reload, pure fast-paced popping",
+        badge="ARCADE",
+        initial_lives=0,
+        time_limit_seconds=None,
+        bubble_initial_count=settings.BUBBLE_INITIAL_COUNT,
+        max_active_start=settings.BUBBLE_MAX_ACTIVE_START,
+        max_active_end=settings.BUBBLE_MAX_ACTIVE_END,
+        speed_min_start=settings.BUBBLE_SPEED_MIN_START,
+        speed_min_end=settings.BUBBLE_SPEED_MIN_END,
+        speed_max_start=settings.BUBBLE_SPEED_MAX_START,
+        speed_max_end=settings.BUBBLE_SPEED_MAX_END,
+        spawn_interval_start=settings.BUBBLE_SPAWN_INTERVAL_START,
+        spawn_interval_end=settings.BUBBLE_SPAWN_INTERVAL_END,
+        spawn_probabilities=settings.SPAWN_PROBS_CLASSIC,
+        allow_life_loss=False,
+        allow_combo=True,
+        difficulty_scaling=True,
+        infinite_ammo=True,
         theme_music_track="classic",
     )
 
@@ -75,9 +105,9 @@ def get_chill_mode() -> ModeConfig:
     """Relaxed endless popping mode with gentle speed, no lives, and no pressure."""
     return ModeConfig(
         mode=GameMode.CHILL,
-        name="CHILL",
+        name="RELAXED",
         tagline="Endless • Relaxed speed, no lives, pure practice",
-        badge="CHILL",
+        badge="RELAXED",
         initial_lives=0,
         time_limit_seconds=None,
         bubble_initial_count=settings.CHILL_BUBBLE_INITIAL_COUNT,
@@ -93,6 +123,7 @@ def get_chill_mode() -> ModeConfig:
         allow_life_loss=False,
         allow_combo=True,
         difficulty_scaling=False,
+        infinite_ammo=False,
         theme_music_track="chill",
     )
 
@@ -119,6 +150,7 @@ def get_timed_mode() -> ModeConfig:
         allow_life_loss=False,
         allow_combo=True,
         difficulty_scaling=True,
+        infinite_ammo=False,
         theme_music_track="timed",
     )
 
@@ -145,15 +177,16 @@ def get_practice_mode() -> ModeConfig:
         allow_life_loss=False,
         allow_combo=True,
         difficulty_scaling=False,
+        infinite_ammo=False,
         theme_music_track="practice",
     )
 
 
 ALL_MODES: list[ModeConfig] = [
     get_classic_mode(),
+    get_arcade_mode(),
     get_chill_mode(),
     get_timed_mode(),
-    get_practice_mode(),
 ]
 
 

@@ -74,6 +74,8 @@ class BubbleGame:
     ) -> None:
         """Switch active game mode and refresh mode settings and targets."""
         self.mode = mode
+        self.weapons.infinite_magazine = self.mode.infinite_ammo
+        self.weapons.reload_enabled = not self.mode.infinite_ammo
         self.high_score = load_high_score(mode_name=self.mode.name)
         self.targets.apply_mode(self.mode)
         if bounds is not None:
@@ -87,6 +89,8 @@ class BubbleGame:
     ) -> None:
         """Completely restart run with fresh lives, stats, score, and targets."""
         self.state = start_state
+        self.weapons.infinite_magazine = self.mode.infinite_ammo
+        self.weapons.reload_enabled = not self.mode.infinite_ammo
         self.weapons.reset_ammo()
         self.score.reset()
         self.combo.reset()

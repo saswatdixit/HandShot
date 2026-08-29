@@ -417,7 +417,7 @@ class BubbleGameTests(unittest.TestCase):
         self.assertEqual(game.mode.name, "CLASSIC")
 
         game.set_mode(get_chill_mode(), BOUNDS)
-        self.assertEqual(game.mode.name, "CHILL")
+        self.assertEqual(game.mode.name, "RELAXED")
         self.assertEqual(game.state, GameState.READY)
         self.assertFalse(game.mode.allow_life_loss)
 
@@ -426,11 +426,11 @@ class BubbleGameTests(unittest.TestCase):
             save_file = Path(temp_dir) / "mode_stats.json"
             save_high_score(200, save_file, mode_name="CLASSIC")
             save_high_score(450, save_file, mode_name="TIMED")
-            save_high_score(120, save_file, mode_name="CHILL")
+            save_high_score(120, save_file, mode_name="RELAXED")
 
             self.assertEqual(load_high_score(save_file, mode_name="CLASSIC"), 200)
             self.assertEqual(load_high_score(save_file, mode_name="TIMED"), 450)
-            self.assertEqual(load_high_score(save_file, mode_name="CHILL"), 120)
+            self.assertEqual(load_high_score(save_file, mode_name="RELAXED"), 120)
             self.assertEqual(load_high_score(save_file, mode_name="PRACTICE"), 0)
 
 

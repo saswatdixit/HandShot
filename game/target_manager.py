@@ -117,9 +117,14 @@ class TargetManager:
 
         return escaped_bubbles
 
-    def shoot(self, position: tuple[float, float]) -> Bubble | None:
-        """Remove and return the closest bubble under a point-shot, if any."""
+    def shoot(self, position: tuple[float, float], snap_assist_px: float = settings.SNAP_ASSIST_RADIUS_PX) -> Bubble | None:
+        """Remove and return the closest bubble under a point-shot, including subtle snap assist if near."""
         candidates = [bubble for bubble in self.bubbles if bubble.contains(position)]
+        if not candidates and snap_assist_px > 0:
+            candidates = [
+                bubble for bubble in self.bubbles
+                if math.dist(bubble.position, position) <= (bubble.radius + snap_assist_px)
+            ]
         if not candidates:
             return None
         hit = min(candidates, key=lambda bubble: math.dist(bubble.position, position))

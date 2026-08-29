@@ -24,9 +24,10 @@ class WeaponSpec:
     weapon_type: WeaponType
     name: str
     tagline: str
+    difficulty_rating: str
     description: str
     magazine_size: int
-    reserve_ammo: int
+    reserve_ammo: int  # -1 represents infinite reserves (∞)
     fire_cooldown_seconds: float
     reload_time_seconds: float
     spread_radius_px: float
@@ -40,22 +41,23 @@ class WeaponSpec:
 
 
 # --------------------------------------------------------------------------
-# Weapon Definitions
+# Rebalanced Weapon Definitions
 # --------------------------------------------------------------------------
 
 PISTOL_SPEC = WeaponSpec(
     weapon_type=WeaponType.PISTOL,
     name="PISTOL",
-    tagline="ACCURATE & CRISP",
+    tagline="Precise",
+    difficulty_rating="Easy",
     description="Reliable semi-auto sidearm with fast handling and zero spread.",
-    magazine_size=12,
-    reserve_ammo=36,
-    fire_cooldown_seconds=0.20,
-    reload_time_seconds=1.20,
+    magazine_size=20,
+    reserve_ammo=-1,
+    fire_cooldown_seconds=0.18,
+    reload_time_seconds=1.10,
     spread_radius_px=0.0,
     pellet_count=1,
     damage=10,
-    recoil_px=4.0,
+    recoil_px=3.5,
     fire_sound="fire_pistol",
     reload_sound="reload_start",
     reload_done_sound="reload_done",
@@ -64,17 +66,18 @@ PISTOL_SPEC = WeaponSpec(
 
 ASSAULT_RIFLE_SPEC = WeaponSpec(
     weapon_type=WeaponType.ASSAULT_RIFLE,
-    name="ASSAULT RIFLE",
-    tagline="RAPID FIRE",
+    name="ASSAULT",
+    difficulty_rating="Medium",
+    tagline="Fast Fire",
     description="High rate-of-fire rifle for fast target sweeping and volume fire.",
-    magazine_size=30,
-    reserve_ammo=90,
-    fire_cooldown_seconds=0.10,
-    reload_time_seconds=1.60,
+    magazine_size=60,
+    reserve_ammo=-1,
+    fire_cooldown_seconds=0.09,
+    reload_time_seconds=1.50,
     spread_radius_px=14.0,
     pellet_count=1,
     damage=8,
-    recoil_px=6.0,
+    recoil_px=5.5,
     fire_sound="fire_rifle",
     reload_sound="reload_start",
     reload_done_sound="reload_done",
@@ -84,16 +87,17 @@ ASSAULT_RIFLE_SPEC = WeaponSpec(
 SHOTGUN_SPEC = WeaponSpec(
     weapon_type=WeaponType.SHOTGUN,
     name="SHOTGUN",
-    tagline="PELLET SPREAD",
+    tagline="Spread",
+    difficulty_rating="Close Range",
     description="Pump shotgun firing 6 dispersed pellets to clear clustered targets.",
-    magazine_size=6,
-    reserve_ammo=24,
-    fire_cooldown_seconds=0.60,
-    reload_time_seconds=1.90,
-    spread_radius_px=38.0,
+    magazine_size=10,
+    reserve_ammo=-1,
+    fire_cooldown_seconds=0.55,
+    reload_time_seconds=1.80,
+    spread_radius_px=36.0,
     pellet_count=6,
     damage=15,
-    recoil_px=12.0,
+    recoil_px=10.0,
     fire_sound="fire_shotgun",
     reload_sound="reload_start",
     reload_done_sound="reload_done",
@@ -103,16 +107,17 @@ SHOTGUN_SPEC = WeaponSpec(
 SNIPER_SPEC = WeaponSpec(
     weapon_type=WeaponType.SNIPER,
     name="SNIPER",
-    tagline="HIGH PRECISION",
+    tagline="Precision",
+    difficulty_rating="Hard",
     description="High-velocity heavy rifle delivering pin-point accuracy.",
-    magazine_size=5,
-    reserve_ammo=15,
-    fire_cooldown_seconds=0.85,
-    reload_time_seconds=2.20,
+    magazine_size=8,
+    reserve_ammo=-1,
+    fire_cooldown_seconds=0.80,
+    reload_time_seconds=2.00,
     spread_radius_px=0.0,
     pellet_count=1,
     damage=30,
-    recoil_px=16.0,
+    recoil_px=14.0,
     fire_sound="fire_sniper",
     reload_sound="reload_start",
     reload_done_sound="reload_done",
@@ -130,8 +135,15 @@ ALL_WEAPONS: list[WeaponSpec] = [
 class WeaponSystem:
     """Manages active weapon, ammunition states, firing rates, and reload cycles."""
 
-    def __init__(self, default_spec: WeaponSpec | None = None) -> None:
+    def __init__(
+        self,
+        default_spec: WeaponSpec | None = None,
+        infinite_magazine: bool = False,
+        reload_enabled: bool = True,
+    ) -> None:
         self._spec = default_spec or PISTOL_SPEC
+        self.infinite_magazine = infinite_magazine
+        self.reload_enabled = reload_enabled
         self._mag_ammo = self._spec.magazine_size
         self._reserve_ammo = self._spec.reserve_ammo
         self._is_reloading = False
@@ -146,7 +158,7 @@ class WeaponSystem:
 
     @property
     def mag_ammo(self) -> int:
-        return self._mag_ammo
+        return self._spec.magazine_size if self.infinite_magazine else self._mag_ammo
 
     @property
     def reserve_ammo(self) -> int:
@@ -154,7 +166,7 @@ class WeaponSystem:
 
     @property
     def is_reloading(self) -> bool:
-        return self._is_reloading
+        return False if self.infinite_magazine else self._is_reloading
 
     @property
     def reload_progress(self) -> float:
@@ -162,19 +174,30 @@ class WeaponSystem:
 
     @property
     def is_empty(self) -> bool:
-        return self._mag_ammo <= 0
+        return False if self.infinite_magazine else (self._mag_ammo <= 0)
 
     @property
     def is_out_of_ammo(self) -> bool:
+        if self.infinite_magazine or self._reserve_ammo == -1:
+            return False
         return self._mag_ammo <= 0 and self._reserve_ammo <= 0
 
+    @property
+    def ammo_display_str(self) -> str:
+        """Formatted ammunition readout for HUD display."""
+        if self.infinite_magazine:
+            return "∞"
+        if self._reserve_ammo == -1:
+            return f"{self._mag_ammo} / ∞"
+        return f"{self._mag_ammo} / {self._reserve_ammo}"
+
     def select_weapon(self, spec: WeaponSpec) -> None:
-        """Switch active weapon spec and reset magazine and reserve ammunition."""
+        """Switch active weapon spec and reset magazine."""
         self._spec = spec
         self.reset_ammo()
 
     def reset_ammo(self) -> None:
-        """Refill magazine and reserves to weapon spec defaults."""
+        """Refill magazine to weapon spec defaults."""
         self._mag_ammo = self._spec.magazine_size
         self._reserve_ammo = self._spec.reserve_ammo
         self._is_reloading = False
@@ -183,10 +206,11 @@ class WeaponSystem:
 
     def can_fire(self, now: float) -> bool:
         """Check if weapon can fire at timestamp ``now``."""
-        if self._is_reloading:
-            return False
-        if self._mag_ammo <= 0:
-            return False
+        if not self.infinite_magazine:
+            if self._is_reloading:
+                return False
+            if self._mag_ammo <= 0:
+                return False
         if (now - self._last_fire_time) < self._spec.fire_cooldown_seconds:
             return False
         return True
@@ -197,11 +221,13 @@ class WeaponSystem:
         aim_pos: tuple[float, float],
         rng: random.Random | None = None,
     ) -> list[tuple[float, float]]:
-        """Consume 1 round from magazine and calculate pellet impact points."""
+        """Consume 1 round from magazine (if finite) and calculate pellet impact points."""
         if not self.can_fire(now):
             return []
 
-        self._mag_ammo -= 1
+        if not self.infinite_magazine:
+            self._mag_ammo -= 1
+
         self._last_fire_time = now
         rand = rng or self._rng
 
@@ -227,11 +253,13 @@ class WeaponSystem:
 
     def can_reload(self) -> bool:
         """Check if reload can be initiated."""
+        if self.infinite_magazine or not self.reload_enabled:
+            return False
         if self._is_reloading:
             return False
         if self._mag_ammo >= self._spec.magazine_size:
             return False
-        if self._reserve_ammo <= 0:
+        if self._reserve_ammo == 0:
             return False
         return True
 
@@ -251,7 +279,7 @@ class WeaponSystem:
 
     def update(self, delta_seconds: float, now: float) -> bool:
         """Update reload timer. Returns True on the exact frame reload completes."""
-        if not self._is_reloading:
+        if self.infinite_magazine or not self._is_reloading:
             self._reload_progress = 0.0
             return False
 
@@ -259,11 +287,14 @@ class WeaponSystem:
         self._reload_progress = min(1.0, elapsed / max(1e-4, self._spec.reload_time_seconds))
 
         if elapsed >= self._spec.reload_time_seconds:
-            # Complete reload
-            needed = self._spec.magazine_size - self._mag_ammo
-            transferred = min(needed, self._reserve_ammo)
-            self._mag_ammo += transferred
-            self._reserve_ammo -= transferred
+            # Complete reload: refill magazine
+            if self._reserve_ammo == -1:
+                self._mag_ammo = self._spec.magazine_size
+            else:
+                needed = self._spec.magazine_size - self._mag_ammo
+                transferred = min(needed, self._reserve_ammo)
+                self._mag_ammo += transferred
+                self._reserve_ammo -= transferred
             self._is_reloading = False
             self._reload_progress = 0.0
             return True

@@ -126,13 +126,18 @@ PINCH_DEBOUNCE_FRAMES = 1
 PINCH_DISTANCE_FILTER_SAMPLES = 1
 
 # --------------------------------------------------------------------------
-# Spatial Reload Zone Settings
+# Spatial Reload Zone Settings & Gameplay Tweaks
 # --------------------------------------------------------------------------
 # Hand/wrist position near bottom of screen triggers reliable reload
-RELOAD_ZONE_TOP = 0.80
-RELOAD_ZONE_EXIT = 0.70
-RELOAD_DWELL_SECONDS = 0.30
+RELOAD_ZONE_TOP = 0.85
+RELOAD_ZONE_EXIT = 0.75
+RELOAD_DWELL_SECONDS = 0.25
 RELOAD_COOLDOWN_SECONDS = 0.50
+AUTO_RELOAD_ON_EMPTY = False
+
+# Aim & Hit Feedback Tuning
+SNAP_ASSIST_RADIUS_PX = 12.0
+TARGET_HIT_FLASH_SECONDS = 0.12
 
 # Visual effects durations (clean and brief)
 TRAINING_TARGET_RADIUS = 44

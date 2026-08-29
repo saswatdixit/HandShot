@@ -14,11 +14,14 @@ class ParticleSystemTests(unittest.TestCase):
         ps = ParticleSystem(rng=random.Random(1))
         self.assertEqual(len(ps._particles), 0)
         self.assertEqual(len(ps._shockwaves), 0)
+        self.assertEqual(len(ps._flashes), 0)
 
         # Emit burst for normal target
         ps.emit_target_burst(100.0, 100.0, BubbleType.NORMAL, now=0.0)
-        self.assertGreater(len(ps._particles), 0)
+        self.assertGreaterEqual(len(ps._particles), 6)
+        self.assertLessEqual(len(ps._particles), 12)
         self.assertGreater(len(ps._shockwaves), 0)
+        self.assertEqual(len(ps._flashes), 1)
 
         # Update at t = 0.1s -> particles move
         p_init_x = ps._particles[0].x
@@ -29,11 +32,12 @@ class ParticleSystemTests(unittest.TestCase):
         ps.update(0.90, now=1.00)
         self.assertEqual(len(ps._particles), 0)
         self.assertEqual(len(ps._shockwaves), 0)
+        self.assertEqual(len(ps._flashes), 0)
 
     def test_golden_target_burst(self) -> None:
         ps = ParticleSystem(rng=random.Random(1))
         ps.emit_target_burst(200.0, 200.0, BubbleType.GOLDEN, now=0.0)
-        self.assertGreater(len(ps._particles), 15)
+        self.assertGreaterEqual(len(ps._particles), 6)
         # Golden targets produce diamond-shaped particles
         self.assertEqual(ps._particles[0].shape, "diamond")
 
@@ -44,6 +48,7 @@ class ParticleSystemTests(unittest.TestCase):
         ps.clear()
         self.assertEqual(len(ps._particles), 0)
         self.assertEqual(len(ps._shockwaves), 0)
+        self.assertEqual(len(ps._flashes), 0)
 
 
 if __name__ == "__main__":

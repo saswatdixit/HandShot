@@ -287,6 +287,7 @@ class AimScreen:
             self._debug_hud = not self._debug_hud
 
         # Mode Select Navigation
+        # Mode Select Navigation
         if st is GameState.MODE_SELECT:
             if event.key in (pygame.K_UP, pygame.K_w):
                 self._selected_mode_idx = (self._selected_mode_idx - 2) % len(ALL_MODES)
@@ -297,7 +298,7 @@ class AimScreen:
             elif event.key in (pygame.K_LEFT, pygame.K_a):
                 self._selected_mode_idx = (self._selected_mode_idx - 1) % len(ALL_MODES)
                 self.audio.play_sfx("menu_move")
-            elif event.key in (pygame.K_RIGHT, pygame.K_d):
+            elif event.key in (pygame.K_RIGHT, pygame.K_d, pygame.K_TAB):
                 self._selected_mode_idx = (self._selected_mode_idx + 1) % len(ALL_MODES)
                 self.audio.play_sfx("menu_move")
             elif event.key in (pygame.K_RETURN, pygame.K_SPACE):
@@ -329,7 +330,7 @@ class AimScreen:
             elif event.key in (pygame.K_LEFT, pygame.K_a):
                 self._selected_weapon_idx = (self._selected_weapon_idx - 1) % len(ALL_WEAPONS)
                 self.audio.play_sfx("menu_move")
-            elif event.key in (pygame.K_RIGHT, pygame.K_d):
+            elif event.key in (pygame.K_RIGHT, pygame.K_d, pygame.K_TAB):
                 self._selected_weapon_idx = (self._selected_weapon_idx + 1) % len(ALL_WEAPONS)
                 self.audio.play_sfx("menu_move")
             elif event.key in (pygame.K_RETURN, pygame.K_SPACE):
@@ -338,6 +339,9 @@ class AimScreen:
                 self._game.reset(self.layout.playfield_bounds, start_state=GameState.READY, now=now)
                 self._particles.clear()
                 self.audio.play_sfx("menu_select")
+            elif event.key == pygame.K_ESCAPE:
+                self._game.state = GameState.MODE_SELECT
+                self.audio.play_sfx("menu_move")
 
         elif st is GameState.PLAYING:
             if event.key in (pygame.K_p, pygame.K_PAUSE):
@@ -358,10 +362,16 @@ class AimScreen:
                 self.audio.play_sfx("menu_select")
             elif event.key == pygame.K_r:
                 self._restart_run(now)
+            elif event.key in (pygame.K_m, pygame.K_ESCAPE):
+                self._game.state = GameState.MODE_SELECT
+                self.audio.play_sfx("menu_move")
 
         elif st is GameState.GAME_OVER:
-            if event.key == pygame.K_r:
+            if event.key in (pygame.K_r, pygame.K_RETURN, pygame.K_SPACE):
                 self._restart_run(now)
+            elif event.key in (pygame.K_m, pygame.K_ESCAPE):
+                self._game.state = GameState.MODE_SELECT
+                self.audio.play_sfx("menu_move")
 
         return True
 
@@ -472,21 +482,31 @@ class AimScreen:
                 if self._game.mode.allow_combo and self._game.combo.current_combo in (3, 5, 10, 15):
                     self.audio.play_sfx("combo_streak")
 
-                # Spawn bubble burst particles
-                self._particles.emit_target_burst(hit_bubble.position[0], hit_bubble.position[1], hit_bubble.target_type, now)
+                # Spawn bubble burst particles and hit flash
+                self._particles.emit_target_burst(
+                    hit_bubble.position[0],
+                    hit_bubble.position[1],
+                    hit_bubble.radius,
+                    hit_bubble.target_type,
+                    now,
+                )
 
-                # Floating score notification
+                # Bullseye / Headshot detection (within inner 35% of bubble radius)
+                is_headshot = math.dist(hit_bubble.position, imp) <= (hit_bubble.radius * 0.35)
                 txt = f"+{pts}"
                 if mult > 1:
                     txt += f" ({mult}x)"
+                if is_headshot:
+                    txt += " • HEADSHOT"
+
                 self._floating_scores.append(
                     FloatingScore(
                         text=txt,
                         x=hit_bubble.position[0],
                         y=hit_bubble.position[1] - 12,
                         created_at=now,
-                        expires_at=now + 0.8,
-                        color=THEME.ACCENT_GOLD if is_gold else THEME.ACCENT_CYAN,
+                        expires_at=now + 0.85,
+                        color=THEME.ACCENT_GOLD if (is_gold or is_headshot) else THEME.ACCENT_CYAN,
                     )
                 )
 
@@ -666,11 +686,13 @@ class AimScreen:
         bar_r = self.layout.top_bar_rect
         draw_card(screen, bar_r, THEME.BG_SURFACE_ELEVATED, THEME.BORDER_SUBTLE, border_radius=10)
 
-        # Zone A: Title & Weapon Badge
+        # Zone A: Title, Mode & Weapon Badge
         z_a = self.layout.left_zone
         self.typo.draw_text(screen, "HANDSHOT", self.typo.h1, THEME.ACCENT_CYAN, (z_a.left + 14, z_a.centery - 2), anchor="left")
-        w_name = self._game.weapons.spec.name
-        self.typo.draw_text(screen, w_name, self.typo.label, THEME.TEXT_MUTED, (z_a.left + 155, z_a.centery + 1), anchor="left")
+        mode_badge = self._game.mode.badge
+        self.typo.draw_text(screen, mode_badge, self.typo.label, THEME.TEXT_SECONDARY, (z_a.left + 148, z_a.centery + 1), anchor="left")
+        w_name = f"[ {self._game.weapons.spec.name} ]"
+        self.typo.draw_text(screen, w_name, self.typo.label, THEME.TEXT_MUTED, (z_a.left + 230, z_a.centery + 1), anchor="left")
 
         # Zone B: Score
         z_b = self.layout.center_zone
@@ -681,16 +703,16 @@ class AimScreen:
         # Zone C: Weapon Ammunition & Lives / Timer
         z_c = self.layout.right_zone
         weapons = self._game.weapons
-        ammo_str = f"{weapons.mag_ammo} / {weapons.reserve_ammo}"
+        ammo_str = weapons.ammo_display_str
 
         # Ammo Display
         if weapons.is_reloading:
             self.typo.draw_text(screen, "RELOADING...", self.typo.body_bold, THEME.ACCENT_GOLD, (z_c.left + 10, z_c.centery), anchor="left")
             # Mini reload progress bar
             bar_w = 60
-            bar_h = 4
+            bar_h = 3
             bar_x = z_c.left + 130
-            bar_y = z_c.centery - 2
+            bar_y = z_c.centery - 1
             pygame.draw.rect(screen, (24, 34, 48), (bar_x, bar_y, bar_w, bar_h), border_radius=2)
             prog_w = round(bar_w * weapons.reload_progress)
             if prog_w > 0:
@@ -703,15 +725,20 @@ class AimScreen:
         else:
             self.typo.draw_text(screen, ammo_str, self.typo.h2, THEME.TEXT_PRIMARY, (z_c.left + 10, z_c.centery), anchor="left")
 
-        # Rightmost: Lives / Chill indicator
+        # Rightmost: Lives / Mode indicator
         if self._game.mode.allow_life_loss:
             lx = z_c.right - 18
             for i in range(self._game.mode.initial_lives):
                 active = (i < self._game.stats.lives)
                 draw_vector_heart(screen, lx, z_c.centery, size=16.0, active=active)
                 lx -= 24
+        elif self._game.time_remaining is not None:
+            time_txt = f"{int(self._game.time_remaining):02d}s"
+            self.typo.draw_text(screen, time_txt, self.typo.h2, THEME.ACCENT_GOLD, (z_c.right - 14, z_c.centery), anchor="right")
+        elif self._game.mode.infinite_ammo:
+            self.typo.draw_text(screen, "ARCADE", self.typo.label, THEME.ACCENT_PURPLE, (z_c.right - 14, z_c.centery), anchor="right")
         else:
-            self.typo.draw_text(screen, "CHILL", self.typo.label, THEME.ACCENT_EMERALD, (z_c.right - 14, z_c.centery), anchor="right")
+            self.typo.draw_text(screen, "RELAXED", self.typo.label, THEME.ACCENT_EMERALD, (z_c.right - 14, z_c.centery), anchor="right")
 
     def _draw_mode_select(self, screen: pygame.Surface, width: int, height: int) -> None:
         """Render mode selection screen with modern aesthetic cards."""
@@ -748,6 +775,8 @@ class AimScreen:
             icon_y = y + card_h // 2
             if m.mode is GameMode.CLASSIC:
                 draw_vector_target(screen, icon_x, icon_y, radius=16, color=THEME.ACCENT_CYAN)
+            elif m.mode is GameMode.ARCADE:
+                draw_vector_star(screen, icon_x, icon_y, radius=16, color=THEME.ACCENT_PURPLE)
             elif m.mode is GameMode.CHILL:
                 draw_vector_leaf(screen, icon_x, icon_y, radius=16, color=THEME.ACCENT_EMERALD)
             elif m.mode is GameMode.TIMED:
@@ -770,7 +799,7 @@ class AimScreen:
         # Footer Instruction
         self.typo.draw_text(
             screen,
-            "[ WASD / Arrows ] Choose Mode    [ ENTER / SPACE ] Next: Choose Weapon    [ M ] Mute    [ ESC / Q ] Quit",
+            "[ WASD / Arrows / TAB ] Choose Mode    [ ENTER / SPACE ] Next: Choose Weapon    [ M ] Mute    [ ESC / Q ] Quit",
             self.typo.body_small,
             THEME.TEXT_SECONDARY,
             (width // 2, height - 32),
@@ -812,8 +841,9 @@ class AimScreen:
             # Text
             text_x = x + 68
             self.typo.draw_text(screen, w_spec.name, self.typo.h1, THEME.TEXT_PRIMARY, (text_x, y + 24), anchor="left")
-            self.typo.draw_text(screen, w_spec.tagline, self.typo.body_bold, THEME.ACCENT_CYAN if is_sel else THEME.TEXT_SECONDARY, (text_x, y + 54), anchor="left")
-            self.typo.draw_text(screen, f"MAG: {w_spec.magazine_size}   RESERVE: {w_spec.reserve_ammo}   RELOAD: {w_spec.reload_time_seconds:.1f}s", self.typo.caption, THEME.TEXT_MUTED, (text_x, y + 84), anchor="left")
+            self.typo.draw_text(screen, f"{w_spec.tagline}   •   {w_spec.difficulty_rating}", self.typo.body_bold, THEME.ACCENT_CYAN if is_sel else THEME.TEXT_SECONDARY, (text_x, y + 54), anchor="left")
+            ammo_desc = f"{w_spec.magazine_size} / ∞" if not self._game.mode.infinite_ammo else "∞ (Arcade)"
+            self.typo.draw_text(screen, f"AMMO: {ammo_desc}   •   RELOAD: {w_spec.reload_time_seconds:.1f}s", self.typo.caption, THEME.TEXT_MUTED, (text_x, y + 84), anchor="left")
 
             if is_sel:
                 draw_keycap(screen, "READY", "", self.typo.label, self.typo.caption, x + card_w - 50, y + card_h // 2, active=True)
@@ -821,7 +851,7 @@ class AimScreen:
         # Footer Instruction
         self.typo.draw_text(
             screen,
-            "[ 1-4 / WASD ] Select Weapon    [ ENTER / SPACE ] Start Run    [ ESC ] Back to Modes",
+            "[ 1-4 / WASD / TAB ] Change Weapon    [ ENTER / SPACE ] Start Run    [ ESC ] Back to Modes",
             self.typo.body_small,
             THEME.TEXT_SECONDARY,
             (width // 2, height - 32),
@@ -870,7 +900,8 @@ class AimScreen:
         num_str = self._game.countdown_text or "3"
         col = THEME.ACCENT_EMERALD if num_str == "GO!" else THEME.ACCENT_CYAN
         self.typo.draw_text(screen, num_str, self.typo.countdown, col, (width // 2, height // 2 - 20), anchor="center")
-        self.typo.draw_text(screen, "PINCH TO SHOOT   •   MOVE HAND DOWN TO RELOAD", self.typo.h2, THEME.TEXT_PRIMARY, (width // 2, height // 2 + 75), anchor="center")
+        reload_hint = "PINCH TO SHOOT" if self._game.mode.infinite_ammo else "PINCH TO SHOOT   •   MOVE HAND DOWN TO RELOAD"
+        self.typo.draw_text(screen, reload_hint, self.typo.h2, THEME.TEXT_PRIMARY, (width // 2, height // 2 + 75), anchor="center")
 
     def _draw_paused(self, screen: pygame.Surface) -> None:
         """Render clean, modern pause overlay card."""
@@ -888,7 +919,7 @@ class AimScreen:
         self.typo.draw_text(screen, "[ M ] Main Menu", self.typo.body, THEME.TEXT_SECONDARY, (r.centerx, r.top + 166), anchor="center")
 
     def _draw_game_over(self, screen: pygame.Surface, now: float) -> None:
-        """Render clean run results card including weapon summary."""
+        """Render clean run results card including weapon & mode summary."""
         w, h = screen.get_size()
         overlay = pygame.Surface((w, h), pygame.SRCALPHA)
         overlay.fill((*THEME.BG_DARK, 220))
@@ -904,18 +935,16 @@ class AimScreen:
         score_txt = f"{self._game.score.score:,}"
         self.typo.draw_text(screen, score_txt, self.typo.display, THEME.TEXT_PRIMARY, (r.centerx, r.top + 78), anchor="center")
 
-        # Weapon used badge
-        w_name = self._game.weapons.spec.name
-        self.typo.draw_text(screen, w_name, self.typo.h2, THEME.ACCENT_CYAN, (r.centerx, r.top + 124), anchor="center")
-
-        # Stats summary row
+        # Stats summary
         acc = f"{self._game.stats.accuracy:.1f}%"
         hits = f"{self._game.stats.targets_hit}"
         shots = f"{self._game.stats.shots_fired}"
+        w_name = self._game.weapons.spec.name
+        m_name = self._game.mode.name
         time_s = f"{self._game.gameplay_time:.1f}s"
 
-        stats_y = r.top + 160
-        self.typo.draw_text(screen, f"ACCURACY: {acc}   •   HITS: {hits}   •   SHOTS: {shots}   •   TIME: {time_s}", self.typo.body_bold, THEME.TEXT_SECONDARY, (r.centerx, stats_y), anchor="center")
+        self.typo.draw_text(screen, f"ACCURACY: {acc}   •   HITS: {hits}   •   SHOTS: {shots}", self.typo.body_bold, THEME.TEXT_SECONDARY, (r.centerx, r.top + 140), anchor="center")
+        self.typo.draw_text(screen, f"WEAPON: {w_name}   •   MODE: {m_name}   •   TIME: {time_s}", self.typo.body_small, THEME.TEXT_MUTED, (r.centerx, r.top + 172), anchor="center")
 
         # Key actions
         self.typo.draw_text(screen, "[ ENTER / R ] Play Again    [ ESC / M ] Mode Select", self.typo.body_small, THEME.ACCENT_CYAN, (r.centerx, r.bottom - 24), anchor="center")
