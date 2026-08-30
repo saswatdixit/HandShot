@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from config import settings
@@ -73,27 +73,51 @@ class ComboTracker:
 
 @dataclass
 class GameStats:
-    """Track run performance, health/lives, accuracy, and special targets."""
+    """Track run performance, health/lives, accuracy, and special targets.
+
+    Two distinct quantities are tracked deliberately, because a single trigger
+    pull of a multi-pellet weapon can destroy more than one target:
+
+      ``shots_fired``  -- trigger pulls (1:1 with magazine rounds consumed)
+      ``targets_hit``  -- targets destroyed (may exceed ``shots_fired``)
+      ``shots_hit``    -- trigger pulls that connected with at least one target
+
+    Accuracy is ``shots_hit / shots_fired`` so it is weapon-neutral and can
+    never exceed 100%. Using ``targets_hit`` as the numerator would mix units
+    and report >100% for the shotgun.
+    """
 
     lives: int = settings.INITIAL_LIVES
     shots_fired: int = 0
     targets_hit: int = 0
+    shots_hit: int = 0
     golden_targets_hit: int = 0
     highest_combo: int = 0
+
+    # Tracks whether the in-flight trigger pull has already been credited as a
+    # connecting shot, so extra pellets from the same pull don't count twice.
+    _shot_connected: bool = field(default=False, init=False, repr=False, compare=False)
 
     @property
     def accuracy(self) -> float:
         if self.shots_fired == 0:
             return 0.0
-        return (self.targets_hit / self.shots_fired) * 100.0
+        return (self.shots_hit / self.shots_fired) * 100.0
 
     def record_shot(self) -> None:
+        """Record one trigger pull, and arm hit-credit for that pull."""
         self.shots_fired += 1
+        self._shot_connected = False
 
     def record_hit(self, is_golden: bool = False) -> None:
+        """Record one destroyed target belonging to the current trigger pull."""
         self.targets_hit += 1
         if is_golden:
             self.golden_targets_hit += 1
+        # Credit the trigger pull once, no matter how many pellets connect.
+        if not self._shot_connected and self.shots_hit < self.shots_fired:
+            self.shots_hit += 1
+            self._shot_connected = True
 
     def lose_life(self, amount: int = 1) -> int:
         self.lives = max(0, self.lives - amount)
@@ -103,8 +127,10 @@ class GameStats:
         self.lives = initial_lives
         self.shots_fired = 0
         self.targets_hit = 0
+        self.shots_hit = 0
         self.golden_targets_hit = 0
         self.highest_combo = 0
+        self._shot_connected = False
 
 
 def load_high_score(path: Path = settings.STATS_SAVE_PATH, mode_name: str = "CLASSIC") -> int:

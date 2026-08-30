@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 import numpy as np
 
 from camera.camera_source import CameraSource, CameraSourceType
@@ -158,10 +157,12 @@ def select_camera_interactively() -> int:
 
     print("\nConnected cameras:")
     for c in cameras:
-        print(f"  [{c.index}] {c.name} ({c.width}x{c.height})")
+        print(f"  {c}")
+    valid = sorted(c.index for c in cameras)
+    prompt = f"\nSelect camera index [{', '.join(str(i) for i in valid)}]: "
     while True:
         try:
-            choice = input(f"\nSelect camera index [0-{len(cameras)-1}]: ").strip()
+            choice = input(prompt).strip()
             idx = int(choice)
             if any(c.index == idx for c in cameras):
                 return idx

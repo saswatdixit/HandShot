@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import random
+from dataclasses import dataclass
 from enum import Enum, auto
 
 from config import settings
-from game.bubble import Bounds, Bubble
+from game.bubble import Bounds, Bubble, BubbleType
 from game.game_mode import GameMode, ModeConfig, get_default_mode
 from game.scoring import (
     ComboTracker,
@@ -29,6 +30,19 @@ class GameState(Enum):
     PLAYING = auto()        # Active gameplay
     PAUSED = auto()         # Frozen by player (P / ESC key)
     GAME_OVER = auto()      # Results screen / session ended
+
+
+@dataclass(frozen=True)
+class ImpactOutcome:
+    """Result of resolving a single impact point (one pellet) against the field."""
+
+    bubble: Bubble | None
+    points: int = 0
+    multiplier: int = 1
+
+    @property
+    def hit(self) -> bool:
+        return self.bubble is not None
 
 
 class BubbleGame:
@@ -202,33 +216,59 @@ class BubbleGame:
             # Ensure fresh target spawn as the round begins
             self.targets.reset(bounds)
 
+    def register_impact(self, position: tuple[float, float]) -> ImpactOutcome:
+        """Resolve ONE impact point (a single pellet) against the target field.
+
+        This is the authoritative scoring implementation: hit detection, combo,
+        points, stats, and high-score persistence all live here, so the live
+        gameplay path and ``shoot()`` cannot drift apart.
+
+        It deliberately does NOT call ``stats.record_shot()`` and does NOT reset
+        the combo on a miss. Those are per-trigger-pull concerns, and one trigger
+        pull of a multi-pellet weapon produces several impacts. The caller owns
+        them (see ``shoot()`` for the single-pellet case).
+        """
+        if self.state is not GameState.PLAYING:
+            return ImpactOutcome(None)
+
+        hit = self.targets.shoot(position)
+        if hit is None:
+            return ImpactOutcome(None)
+
+        is_golden = (hit.target_type is BubbleType.GOLDEN)
+        self.stats.record_hit(is_golden=is_golden)
+        multiplier = self.combo.register_hit() if self.mode.allow_combo else 1
+        self.stats.highest_combo = max(self.stats.highest_combo, self.combo.highest_combo)
+        points = hit.base_score * multiplier
+        self.score.add(points)
+
+        if self.score.score > self.high_score:
+            self.is_new_high_score = True
+            self.high_score = self.score.score
+            # Deliberately in-memory only: this runs once per pellet inside the
+            # 60fps loop. `_trigger_game_over()` performs the single disk write.
+
+        return ImpactOutcome(hit, points, multiplier)
+
     def shoot(self, position: tuple[float, float]) -> tuple[Bubble | None, int]:
-        """Record a shot attempt. Only registers in PLAYING state."""
+        """Fire one single-impact shot. Only registers in PLAYING state.
+
+        Convenience wrapper for single-pellet fire: counts the trigger pull, then
+        resolves exactly one impact via ``register_impact()``. Multi-pellet
+        weapons cannot use this (one pull -> N impacts); those callers do the
+        ``record_shot()`` / per-pellet ``register_impact()`` / miss-reset
+        sequence themselves.
+        """
         if self.state is not GameState.PLAYING:
             return None, 0
 
         self.stats.record_shot()
-        hit = self.targets.shoot(position)
+        outcome = self.register_impact(position)
 
-        if hit is not None:
-            from game.bubble import BubbleType
-            is_golden = (hit.target_type is BubbleType.GOLDEN)
-            self.stats.record_hit(is_golden=is_golden)
-            multiplier = self.combo.register_hit() if self.mode.allow_combo else 1
-            self.stats.highest_combo = max(self.stats.highest_combo, self.combo.highest_combo)
-            points = hit.base_score * multiplier
-            self.score.add(points)
+        if outcome.bubble is None and self.mode.allow_combo:
+            self.combo.register_miss()
 
-            if self.score.score > self.high_score:
-                self.is_new_high_score = True
-                self.high_score = self.score.score
-                save_high_score(self.score.score, mode_name=self.mode.name)
-
-            return hit, points
-        else:
-            if self.mode.allow_combo:
-                self.combo.register_miss()
-            return None, 0
+        return outcome.bubble, outcome.points
 
     def _trigger_game_over(self) -> None:
         """End the run and persist high score."""

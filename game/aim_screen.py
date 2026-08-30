@@ -207,7 +207,7 @@ class AimScreen:
 
                 # Handle Shooting Action (Pinch Only)
                 if pinch_result and pinch_result.shot and self._game.state is GameState.PLAYING:
-                    self._handle_shot(aim_pos, now)
+                    self._handle_shot(now)
 
                 # Recoil decay
                 if self._recoil_offset_px > 0.0:
@@ -439,8 +439,13 @@ class AimScreen:
         elif weapons.is_empty and weapons.reserve_ammo <= 0:
             self.audio.play_sfx(weapons.spec.empty_sound)
 
-    def _handle_shot(self, aim_pos: tuple[float, float], now: float) -> None:
-        """Handle weapon discharge on pinch gesture."""
+    def _handle_shot(self, now: float) -> None:
+        """Handle weapon discharge on pinch gesture.
+
+        Impact origin is the pre-pinch *anchored* position, not the current aim
+        position, so the mechanical jerk of squeezing the fingers cannot pull the
+        shot off target.
+        """
         weapons = self._game.weapons
 
         if weapons.is_reloading:
@@ -462,6 +467,8 @@ class AimScreen:
         if not impacts:
             return
 
+        # One trigger pull == one round == one recorded shot, regardless of how
+        # many pellets it produces.
         self._game.stats.record_shot()
         self._last_shot_display_until = now + 0.35
         self._fire_pulse_until = now + settings.CROSSHAIR_FIRE_PULSE_SECONDS
@@ -470,17 +477,16 @@ class AimScreen:
 
         hit_any = False
         for imp in impacts:
-            hit_bubble = self._game.targets.shoot(imp)
+            # Scoring/stats/combo accounting lives in BubbleGame.register_impact();
+            # everything below is presentation only.
+            outcome = self._game.register_impact(imp)
+            hit_bubble = outcome.bubble
             if hit_bubble is not None:
                 hit_any = True
-                mult = self._game.combo.register_hit() if self._game.mode.allow_combo else 1
-                pts = hit_bubble.base_score * mult
-                self._game.score.add(pts)
+                mult = outcome.multiplier
+                pts = outcome.points
                 self._score_pulse_until = now + 0.15
                 is_gold = (hit_bubble.target_type is BubbleType.GOLDEN)
-                self._game.stats.record_hit(is_golden=is_gold)
-                if self._game.combo.current_combo > self._game.stats.highest_combo:
-                    self._game.stats.highest_combo = self._game.combo.current_combo
 
                 if self._game.mode.allow_combo and self._game.combo.current_combo in (3, 5, 10, 15):
                     self.audio.play_sfx("combo_streak")
@@ -696,9 +702,11 @@ class AimScreen:
         z_c = self.layout.right_zone
 
         # ── Left Zone: HANDSHOT + Mode · Weapon ──────────────────────
-        self.typo.draw_text(screen, "HANDSHOT", self.typo.heading, THEME.TEXT_PRIMARY, (z_a.left, z_a.top + THEME.SP_8), anchor="topleft")
+        # Rows are stacked using measured font height, not fixed spacing
+        # constants, so the two lines cannot overlap when font metrics change.
+        title_rect = self.typo.draw_text(screen, "HANDSHOT", self.typo.heading, THEME.TEXT_PRIMARY, (z_a.left, z_a.top + THEME.SP_8), anchor="topleft")
         mode_weapon = f"{self._game.mode.badge}  ·  {self._game.weapons.spec.name}"
-        self.typo.draw_label(screen, mode_weapon, self.typo.label, THEME.TEXT_MUTED, (z_a.left, z_a.top + THEME.SP_32 + THEME.SP_4), anchor="topleft", tracking=2)
+        self.typo.draw_label(screen, mode_weapon, self.typo.label, THEME.TEXT_MUTED, (z_a.left, title_rect.bottom + 2), anchor="topleft", tracking=2)
 
         # ── Center Zone: Score ───────────────────────────────────────
         self.typo.draw_label(screen, "SCORE", self.typo.label, THEME.TEXT_MUTED, (z_b.centerx, z_b.top + THEME.SP_4), anchor="center", tracking=3)
@@ -708,25 +716,32 @@ class AimScreen:
         self.typo.draw_text(screen, score_str, score_font, THEME.TEXT_PRIMARY, (z_b.centerx, z_b.top + THEME.SP_32), anchor="center")
 
         # ── Right Zone: Ammo + Lives / Timer ─────────────────────────
+        # Each row is placed below the measured bottom of the previous one, so
+        # the ammo value, its label, and the lives/timer row stay separated
+        # regardless of the resolved font metrics.
         weapons = self._game.weapons
         ammo_str = weapons.ammo_display_str
+        row_top = z_c.top + THEME.SP_8
 
         if weapons.is_reloading:
-            self.typo.draw_text(screen, "RELOADING", self.typo.body_bold, THEME.WARNING, (z_c.right, z_c.top + THEME.SP_8), anchor="topright")
+            r = self.typo.draw_text(screen, "RELOADING", self.typo.body_bold, THEME.WARNING, (z_c.right, row_top), anchor="topright")
             # Thin inline reload progress
             bar_w = min(100, z_c.width - THEME.SP_16)
             bar_x = z_c.right - bar_w
-            bar_y = z_c.top + THEME.SP_24 + THEME.SP_4
+            bar_y = r.bottom + 3
             draw_progress_bar(screen, bar_x, bar_y, bar_w, 3, weapons.reload_progress, THEME.BG_SURFACE_ELEVATED, THEME.WARNING)
+            row2_bottom = bar_y + 3
         elif weapons.is_empty:
-            self.typo.draw_text(screen, "RELOAD", self.typo.body_bold, THEME.ERROR, (z_c.right, z_c.top + THEME.SP_8), anchor="topright")
-            self.typo.draw_text(screen, ammo_str, self.typo.label, THEME.TEXT_MUTED, (z_c.right, z_c.top + THEME.SP_24 + THEME.SP_4), anchor="topright")
+            r = self.typo.draw_text(screen, "RELOAD", self.typo.body_bold, THEME.ERROR, (z_c.right, row_top), anchor="topright")
+            r2 = self.typo.draw_text(screen, ammo_str, self.typo.label, THEME.TEXT_MUTED, (z_c.right, r.bottom + 2), anchor="topright")
+            row2_bottom = r2.bottom
         else:
-            self.typo.draw_text(screen, ammo_str, self.typo.heading, THEME.TEXT_PRIMARY, (z_c.right, z_c.top + THEME.SP_8), anchor="topright")
-            self.typo.draw_label(screen, "AMMO", self.typo.caption, THEME.TEXT_MUTED, (z_c.right, z_c.top + THEME.SP_32 + THEME.SP_4), anchor="topright", tracking=2)
+            r = self.typo.draw_text(screen, ammo_str, self.typo.heading, THEME.TEXT_PRIMARY, (z_c.right, row_top), anchor="topright")
+            r2 = self.typo.draw_label(screen, "AMMO", self.typo.caption, THEME.TEXT_MUTED, (z_c.right, r.bottom + 2), anchor="topright", tracking=2)
+            row2_bottom = r2.bottom
 
         # Lives / Timer / Mode badge (below ammo area)
-        indicator_y = z_c.top + THEME.SP_48 + THEME.SP_4
+        indicator_y = row2_bottom + 9
         if self._game.mode.allow_life_loss:
             lx = z_c.right - 8
             for i in range(self._game.mode.initial_lives):
@@ -1113,7 +1128,13 @@ class AimScreen:
         else:
             dist_text = "PINCH: —"
 
-        stats_text = f"LIVES: {self._game.stats.lives}  HITS: {self._game.stats.targets_hit}/{self._game.stats.shots_fired} ({self._game.stats.accuracy:.0f}%)"
+        st = self._game.stats
+        # Accuracy is shots_hit/shots_fired; targets_hit is shown separately
+        # because one multi-pellet shot can destroy several targets.
+        stats_text = (
+            f"LIVES: {st.lives}  ACC: {st.shots_hit}/{st.shots_fired} ({st.accuracy:.0f}%)"
+            f"  TGTS: {st.targets_hit}"
+        )
 
         line_h = THEME.SP_16 + 2
         y = r.top + THEME.SP_8

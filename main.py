@@ -406,6 +406,7 @@ def run_game(args: argparse.Namespace) -> int:
                 screen_app._game.is_new_high_score = True
                 screen_app._game.stats.shots_fired = 52
                 screen_app._game.stats.targets_hit = 48
+                screen_app._game.stats.shots_hit = 45
                 screen_app._game.stats.golden_targets_hit = 4
                 screen_app._game.stats.highest_combo = 4
         return screen_app.run(args.duration)
