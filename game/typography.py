@@ -49,16 +49,23 @@ class Typography:
                     "Helvetica",
                 ]
 
+            # Pygame's SysFont silently falls back to the default pygame font
+            # if the requested name is not found on the system.
+            # We must use match_font first to properly check availability and respect our cascade.
             for name in candidates:
                 try:
-                    font = pygame.font.SysFont(name, size, bold=bold)
-                    if font is not None:
+                    # Check if the font actually exists on the system before blindly calling SysFont
+                    matched_path = pygame.font.match_font(name, bold=bold)
+                    if matched_path is not None:
+                        font = pygame.font.Font(matched_path, size)
                         break
                 except Exception:
                     continue
 
             if font is None:
+                # Absolute fallback if no candidate font exists
                 font = pygame.font.Font(None, size)
+
             self._cache[key] = font
         return self._cache[key]
 

@@ -160,3 +160,27 @@ class AimControllerTests(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
 
+
+    def test_soft_knee_deadzone_and_speed_clamping(self) -> None:
+        aim = AimController((1000, 500), AimSettings(
+            input_left=0.0, input_top=0.0, input_right=1.0, input_bottom=1.0,
+            deadzone=0.01, smoothing_hz=24.0, min_cutoff_hz=2.5, speed_coeff=18.0,
+        ))
+
+        # Settle
+        for _ in range(30):
+            aim.update((0.5, 0.5), 1 / 60)
+
+        p_base = aim.position
+
+        # Noise within deadzone - should be entirely swallowed
+        # 0.505 - 0.5 = 0.005. hypot(0.005, 0.005) = 0.007 < 0.01 deadzone
+        p_noise1 = aim.update((0.505, 0.505), 1 / 60)
+        self.assertEqual(p_base, p_noise1)
+
+        # Break deadzone - soft knee should apply a small delta instead of a jump
+        p_moved = aim.update((0.52, 0.52), 1 / 60)
+        self.assertNotEqual(p_base, p_moved)
+
+if __name__ == "__main__":
+    unittest.main()

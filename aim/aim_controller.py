@@ -148,15 +148,25 @@ class AimController:
                 if not (math.isfinite(raw[0]) and math.isfinite(raw[1])):
                     raw = self._last_raw_input
 
-                # 2. Deadzone check
+                # 2. Soft-knee deadzone check for stability
+                # A hard deadzone feels sticky. A soft-knee maps [0, deadzone] to 0,
+                # and scales [deadzone, infinity] smoothly so small intentional movements pass through.
+                delta_x = raw[0] - self._last_raw_input[0]
+                delta_y = raw[1] - self._last_raw_input[1]
+                dist = math.hypot(delta_x, delta_y)
+
                 if self.settings.deadzone > 0:
-                    delta_x = raw[0] - self._last_raw_input[0]
-                    delta_y = raw[1] - self._last_raw_input[1]
-                    dist = math.hypot(delta_x, delta_y)
-                    if dist < self.settings.deadzone:
+                    if dist <= self.settings.deadzone:
                         effective_input = self._last_raw_input
                     else:
-                        effective_input = raw
+                        # Soft-knee: remap distance to subtract deadzone smoothly
+                        scale = (dist - self.settings.deadzone) / dist
+                        effective_input = (
+                            self._last_raw_input[0] + delta_x * scale,
+                            self._last_raw_input[1] + delta_y * scale
+                        )
+                        # We must update the raw anchor to the actual new measurement,
+                        # so subsequent distance checks are relative to the new physical position.
                         self._last_raw_input = raw
                 else:
                     effective_input = raw
@@ -179,7 +189,14 @@ class AimController:
                     )
 
                     # Dynamic cutoff frequency (1€ filter formula)
+                    # When hand is still, speed drops to 0 and cutoff goes to min_cutoff_hz.
+                    # By suppressing the velocity estimation at very low speeds, we stabilize the crosshair.
                     speed = math.hypot(self._filtered_dx[0], self._filtered_dx[1])
+
+                    # Stabilization threshold: if speed is incredibly low, clamp it to 0 so the filter goes to maximum smoothing.
+                    if speed < 0.05:
+                        speed = 0.0
+
                     cutoff_hz = self.settings.min_cutoff_hz + self.settings.speed_coeff * speed
                     if self.settings.smoothing_hz > 0:
                         # Allow smoothing_hz to scale responsiveness
@@ -187,10 +204,17 @@ class AimController:
                     self._current_cutoff_hz = cutoff_hz
 
                     alpha_pos = self._compute_alpha(cutoff_hz, dt)
-                    self._filtered_input = (
-                        alpha_pos * effective_input[0] + (1.0 - alpha_pos) * self._filtered_input[0],
-                        alpha_pos * effective_input[1] + (1.0 - alpha_pos) * self._filtered_input[1],
-                    )
+
+                    # Hard clamping logic for absolute visual stability.
+                    # If speed is fully clamped to 0, and effective input hasn't moved (due to deadzone),
+                    # bypass updating the filtered position entirely to prevent asymptotic micro-creep.
+                    if speed == 0.0 and effective_input == self._last_raw_input and dist <= self.settings.deadzone:
+                        pass # Retain exact previous filtered_input and position
+                    else:
+                        self._filtered_input = (
+                            alpha_pos * effective_input[0] + (1.0 - alpha_pos) * self._filtered_input[0],
+                            alpha_pos * effective_input[1] + (1.0 - alpha_pos) * self._filtered_input[1],
+                        )
 
                 # Map directly to playfield
                 self._target = self._map_to_playfield(self._filtered_input)

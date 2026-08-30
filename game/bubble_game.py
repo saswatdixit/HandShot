@@ -202,33 +202,46 @@ class BubbleGame:
             # Ensure fresh target spawn as the round begins
             self.targets.reset(bounds)
 
-    def shoot(self, position: tuple[float, float]) -> tuple[Bubble | None, int]:
-        """Record a shot attempt. Only registers in PLAYING state."""
-        if self.state is not GameState.PLAYING:
-            return None, 0
+    def shoot(self, impacts: list[tuple[float, float]]) -> list[tuple[Bubble | None, int]]:
+        """Record a shot attempt for single or multiple pellets. Only registers in PLAYING state."""
+        if self.state is not GameState.PLAYING or not impacts:
+            return [(None, 0)] * len(impacts) if impacts else []
 
         self.stats.record_shot()
-        hit = self.targets.shoot(position)
 
-        if hit is not None:
-            from game.bubble import BubbleType
-            is_golden = (hit.target_type is BubbleType.GOLDEN)
-            self.stats.record_hit(is_golden=is_golden)
-            multiplier = self.combo.register_hit() if self.mode.allow_combo else 1
-            self.stats.highest_combo = max(self.stats.highest_combo, self.combo.highest_combo)
-            points = hit.base_score * multiplier
-            self.score.add(points)
+        results: list[tuple[Bubble | None, int]] = []
+        hit_any = False
+        any_golden = False
 
+        from game.bubble import BubbleType
+
+        for position in impacts:
+            hit = self.targets.shoot(position)
+            if hit is not None:
+                hit_any = True
+                is_golden = (hit.target_type is BubbleType.GOLDEN)
+                if is_golden:
+                    any_golden = True
+
+                multiplier = self.combo.register_hit() if self.mode.allow_combo else 1
+                self.stats.highest_combo = max(self.stats.highest_combo, self.combo.highest_combo)
+                points = hit.base_score * multiplier
+                self.score.add(points)
+                results.append((hit, points))
+            else:
+                results.append((None, 0))
+
+        if hit_any:
+            self.stats.record_hit(is_golden=any_golden)
             if self.score.score > self.high_score:
                 self.is_new_high_score = True
                 self.high_score = self.score.score
                 save_high_score(self.score.score, mode_name=self.mode.name)
-
-            return hit, points
         else:
             if self.mode.allow_combo:
                 self.combo.register_miss()
-            return None, 0
+
+        return results
 
     def _trigger_game_over(self) -> None:
         """End the run and persist high score."""
