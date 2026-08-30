@@ -51,21 +51,22 @@ class Typography:
 
             # NOTE: pygame.font.SysFont() never returns None and never raises for
             # a missing family -- it silently substitutes the built-in default
-            # font. Probing each candidate with SysFont therefore always
-            # "succeeded" on the first name and the cascade never advanced.
-            # match_font() is the real availability check; it returns None when
-            # the family is not installed.
-            try:
-                available = [n for n in candidates if pygame.font.match_font(n) is not None]
-                if available:
-                    # SysFont accepts a comma-separated preference list and picks
-                    # the first installed family, applying real or synthetic bold.
-                    font = pygame.font.SysFont(",".join(available), size, bold=bold)
-            except Exception:
-                font = None
+            # font. match_font() is the real availability check; it returns None
+            # when the family is not installed. We load the matched path directly
+            # via Font() to avoid SysFont's silent fallback.
+            for name in candidates:
+                try:
+                    matched_path = pygame.font.match_font(name, bold=bold)
+                    if matched_path is not None:
+                        font = pygame.font.Font(matched_path, size)
+                        break
+                except Exception:
+                    continue
 
             if font is None:
+                # Absolute fallback if no candidate font exists
                 font = pygame.font.Font(None, size)
+
             self._cache[key] = font
         return self._cache[key]
 

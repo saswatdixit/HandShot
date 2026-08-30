@@ -83,7 +83,8 @@ class TargetVarietyTests(unittest.TestCase):
         golden_bubble = Bubble((400.0, 300.0), (0.0, 0.0), 35.0, target_type=BubbleType.GOLDEN)
         game.targets.bubbles = [golden_bubble]
 
-        hit, points = game.shoot((400.0, 300.0))
+        results = game.shoot([(400.0, 300.0)])
+        hit, points = results[0]
         self.assertIsNotNone(hit)
         self.assertEqual(hit.target_type, BubbleType.GOLDEN)
         self.assertEqual(points, 50)

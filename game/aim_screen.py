@@ -21,6 +21,16 @@ from game.game_mode import ALL_MODES, GameMode, ModeConfig
 from game.particles import ParticleSystem
 from game.theme import THEME
 from game.typography import Typography
+
+from game.screens import (
+    ModeSelectScreen,
+    WeaponSelectScreen,
+    ReadyScreen,
+    CountdownScreen,
+    PlayingScreen,
+    PauseScreen,
+    GameOverScreen
+)
 from game.ui_layout import UILayout
 from game.ui_renderer import (
     draw_card,
@@ -137,6 +147,16 @@ class AimScreen:
         self._game_over_entered_at = 0.0
         self._score_pulse_until = 0.0
 
+        self.screens = {
+            GameState.MODE_SELECT: ModeSelectScreen(self),
+            GameState.WEAPON_SELECT: WeaponSelectScreen(self),
+            GameState.READY: ReadyScreen(self),
+            GameState.COUNTDOWN: CountdownScreen(self),
+            GameState.PLAYING: PlayingScreen(self),
+            GameState.PAUSED: PauseScreen(self),
+            GameState.GAME_OVER: GameOverScreen(self),
+        }
+
     def run(self, duration: float = 0.0) -> int:
         screen = pygame.display.set_mode(
             (settings.GAME_WIDTH, settings.GAME_HEIGHT), pygame.RESIZABLE
@@ -245,6 +265,12 @@ class AimScreen:
     def _handle_key_event(self, event: pygame.event.Event, screen: pygame.Surface, now: float) -> bool:
         st = self._game.state
 
+        # First, allow the active screen state a chance to intercept keys
+        active_screen = self.screens.get(st)
+        if active_screen and active_screen.handle_key_event(event, now):
+            return True
+
+        # Global fallbacks if the active screen did not handle it
         if event.key in (pygame.K_ESCAPE, pygame.K_q):
             if st is GameState.MODE_SELECT:
                 return False
@@ -288,92 +314,6 @@ class AimScreen:
 
         elif event.key == pygame.K_d:
             self._debug_hud = not self._debug_hud
-
-        # Mode Select Navigation
-        if st is GameState.MODE_SELECT:
-            if event.key in (pygame.K_UP, pygame.K_w):
-                self._selected_mode_idx = (self._selected_mode_idx - 2) % len(ALL_MODES)
-                self.audio.play_sfx("menu_move")
-            elif event.key in (pygame.K_DOWN, pygame.K_s):
-                self._selected_mode_idx = (self._selected_mode_idx + 2) % len(ALL_MODES)
-                self.audio.play_sfx("menu_move")
-            elif event.key in (pygame.K_LEFT, pygame.K_a):
-                self._selected_mode_idx = (self._selected_mode_idx - 1) % len(ALL_MODES)
-                self.audio.play_sfx("menu_move")
-            elif event.key in (pygame.K_RIGHT, pygame.K_d, pygame.K_TAB):
-                self._selected_mode_idx = (self._selected_mode_idx + 1) % len(ALL_MODES)
-                self.audio.play_sfx("menu_move")
-            elif event.key in (pygame.K_RETURN, pygame.K_SPACE):
-                chosen_mode = ALL_MODES[self._selected_mode_idx]
-                self._game.set_mode(chosen_mode, self.layout.playfield_bounds, start_state=GameState.WEAPON_SELECT)
-                self._particles.clear()
-                self.audio.play_sfx("menu_select")
-
-        # Weapon Select Navigation
-        elif st is GameState.WEAPON_SELECT:
-            if event.key == pygame.K_1:
-                self._selected_weapon_idx = 0
-                self.audio.play_sfx("menu_move")
-            elif event.key == pygame.K_2:
-                self._selected_weapon_idx = 1
-                self.audio.play_sfx("menu_move")
-            elif event.key == pygame.K_3:
-                self._selected_weapon_idx = 2
-                self.audio.play_sfx("menu_move")
-            elif event.key == pygame.K_4:
-                self._selected_weapon_idx = 3
-                self.audio.play_sfx("menu_move")
-            elif event.key in (pygame.K_UP, pygame.K_w):
-                self._selected_weapon_idx = (self._selected_weapon_idx - 2) % len(ALL_WEAPONS)
-                self.audio.play_sfx("menu_move")
-            elif event.key in (pygame.K_DOWN, pygame.K_s):
-                self._selected_weapon_idx = (self._selected_weapon_idx + 2) % len(ALL_WEAPONS)
-                self.audio.play_sfx("menu_move")
-            elif event.key in (pygame.K_LEFT, pygame.K_a):
-                self._selected_weapon_idx = (self._selected_weapon_idx - 1) % len(ALL_WEAPONS)
-                self.audio.play_sfx("menu_move")
-            elif event.key in (pygame.K_RIGHT, pygame.K_d, pygame.K_TAB):
-                self._selected_weapon_idx = (self._selected_weapon_idx + 1) % len(ALL_WEAPONS)
-                self.audio.play_sfx("menu_move")
-            elif event.key in (pygame.K_RETURN, pygame.K_SPACE):
-                chosen_weapon = ALL_WEAPONS[self._selected_weapon_idx]
-                self._game.weapons.select_weapon(chosen_weapon)
-                self._game.reset(self.layout.playfield_bounds, start_state=GameState.READY, now=now)
-                self._particles.clear()
-                self.audio.play_sfx("menu_select")
-            elif event.key == pygame.K_ESCAPE:
-                self._game.state = GameState.MODE_SELECT
-                self.audio.play_sfx("menu_move")
-
-        elif st is GameState.PLAYING:
-            if event.key in (pygame.K_p, pygame.K_PAUSE):
-                paused = self._game.toggle_pause()
-                if paused:
-                    self.audio.play_sfx("pause")
-            elif event.key == pygame.K_r:
-                self._handle_reload(now)
-            elif event.key in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4):
-                idx = event.key - pygame.K_1
-                if 0 <= idx < len(ALL_WEAPONS):
-                    self._game.weapons.select_weapon(ALL_WEAPONS[idx])
-                    self.audio.play_sfx("menu_move")
-
-        elif st is GameState.PAUSED:
-            if event.key in (pygame.K_p, pygame.K_PAUSE, pygame.K_SPACE):
-                self._game.toggle_pause()
-                self.audio.play_sfx("menu_select")
-            elif event.key == pygame.K_r:
-                self._restart_run(now)
-            elif event.key in (pygame.K_m, pygame.K_ESCAPE):
-                self._game.state = GameState.MODE_SELECT
-                self.audio.play_sfx("menu_move")
-
-        elif st is GameState.GAME_OVER:
-            if event.key in (pygame.K_r, pygame.K_RETURN, pygame.K_SPACE):
-                self._restart_run(now)
-            elif event.key in (pygame.K_m, pygame.K_ESCAPE):
-                self._game.state = GameState.MODE_SELECT
-                self.audio.play_sfx("menu_move")
 
         return True
 
@@ -555,7 +495,7 @@ class AimScreen:
         shine_y = y - round(r * 0.35)
         pygame.draw.circle(surface, inner_col, (shine_x, shine_y), shine_r)
 
-    def _draw(
+    def draw_gameplay_base(
         self,
         screen: pygame.Surface,
         result: TrackingResult | None,
@@ -564,6 +504,9 @@ class AimScreen:
         aim_pos: tuple[float, float],
         now: float,
     ) -> None:
+        """Draw the shared gameplay background, targets, crosshair, and HUD.
+        This is composed by screen states that sit on top of the active simulation.
+        """
         w, h = screen.get_size()
         screen.fill(THEME.BG_DARK)
 
@@ -621,19 +564,25 @@ class AimScreen:
         if self._game.state not in (GameState.MODE_SELECT, GameState.WEAPON_SELECT):
             self._draw_hud(screen, result, reload_result, now)
 
-        # Render State Screens
-        if self._game.state is GameState.MODE_SELECT:
-            self._draw_mode_select(screen, w, h)
-        elif self._game.state is GameState.WEAPON_SELECT:
-            self._draw_weapon_select(screen, w, h)
-        elif self._game.state is GameState.READY:
-            self._draw_ready(screen, result is not None and result.has_hand)
-        elif self._game.state is GameState.COUNTDOWN:
-            self._draw_countdown(screen, w, h)
-        elif self._game.state is GameState.PAUSED:
-            self._draw_paused(screen)
-        elif self._game.state is GameState.GAME_OVER:
-            self._draw_game_over(screen, now)
+    def _draw(
+        self,
+        screen: pygame.Surface,
+        result: TrackingResult | None,
+        pinch_result: PinchResult | None,
+        reload_result: ReloadResult | None,
+        aim_pos: tuple[float, float],
+        now: float,
+    ) -> None:
+
+        w, h = screen.get_size()
+
+        # Render Active State Screen
+        active_screen = self.screens.get(self._game.state)
+        if active_screen:
+            active_screen.draw(screen, result, pinch_result, reload_result, aim_pos, now)
+        else:
+            # Fallback if state screen is missing
+            screen.fill(THEME.BG_DARK)
 
         # Audio toast notification
         if now < self._audio_notify_until:
@@ -751,266 +700,6 @@ class AimScreen:
         elif self._game.time_remaining is not None:
             time_txt = f"{int(self._game.time_remaining):02d}s"
             self.typo.draw_text(screen, time_txt, self.typo.heading, THEME.WARNING, (z_c.right, indicator_y), anchor="right")
-
-    def _draw_mode_select(self, screen: pygame.Surface, width: int, height: int) -> None:
-        """Render premium home / mode selection screen."""
-        screen.fill(THEME.BG_DARK)
-        self._draw_ambient_grid(screen, width, height)
-
-        # ── Title Area ───────────────────────────────────────────────
-        self.typo.draw_text(screen, "HANDSHOT", self.typo.title, THEME.TEXT_PRIMARY, (width // 2, 48), anchor="center")
-        self.typo.draw_label(screen, "Aim  ·  React  ·  Shoot", self.typo.label, THEME.TEXT_MUTED, (width // 2, 92), anchor="center", tracking=3)
-
-        # ── Subtitle ────────────────────────────────────────────────
-        self.typo.draw_text(screen, "Select Mode", self.typo.body, THEME.TEXT_SECONDARY, (width // 2, 126), anchor="center")
-
-        # ── 2×2 Mode Cards ──────────────────────────────────────────
-        cards = self.layout.mode_card_grid()
-
-        # Mode metadata for bottom row
-        _mode_meta: dict[GameMode, tuple[str, str]] = {
-            GameMode.CLASSIC: ("3 LIVES", ""),
-            GameMode.ARCADE: ("∞ AMMO", ""),
-            GameMode.CHILL: ("ENDLESS", ""),
-            GameMode.TIMED: ("60 SEC", ""),
-        }
-        # Mode icons
-        _mode_icon = {
-            GameMode.CLASSIC: (draw_vector_target, THEME.ACCENT_CYAN),
-            GameMode.ARCADE: (draw_vector_star, THEME.ACCENT_PURPLE),
-            GameMode.CHILL: (draw_vector_leaf, THEME.ACCENT_EMERALD),
-            GameMode.TIMED: (draw_vector_stopwatch, THEME.ACCENT_GOLD),
-        }
-
-        for i, m in enumerate(ALL_MODES):
-            rect = cards[i]
-            is_sel = (i == self._selected_mode_idx)
-
-            bg = THEME.CARD_BG_SELECTED if is_sel else THEME.CARD_BG
-            border = THEME.BORDER_FOCUS if is_sel else THEME.BORDER_SUBTLE
-            bw = THEME.BORDER_W_FOCUS if is_sel else THEME.BORDER_W_THIN
-
-            draw_card(screen, rect, bg, border, border_width=bw, border_radius=THEME.RADIUS_LG)
-
-            # Icon
-            icon_fn, icon_col = _mode_icon.get(m.mode, (draw_vector_star, THEME.ACCENT_PURPLE))
-            icon_fn(screen, rect.left + THEME.SP_24, rect.top + THEME.SP_24, radius=12, color=icon_col if is_sel else THEME.TEXT_MUTED)
-
-            # Mode name
-            name_col = THEME.TEXT_PRIMARY if is_sel else THEME.TEXT_SECONDARY
-            self.typo.draw_text(screen, m.name, self.typo.heading, name_col, (rect.left + THEME.SP_48 + THEME.SP_4, rect.top + THEME.SP_16), anchor="topleft")
-
-            # Tagline
-            tag_col = THEME.TEXT_SECONDARY if is_sel else THEME.TEXT_MUTED
-            self.typo.draw_text(screen, m.tagline, self.typo.body_small, tag_col, (rect.left + THEME.SP_48 + THEME.SP_4, rect.top + THEME.SP_48 - THEME.SP_4), anchor="topleft")
-
-            # Bottom row: mode meta + high score
-            meta_y = rect.bottom - THEME.SP_24
-            meta_label, _ = _mode_meta.get(m.mode, ("", ""))
-            meta_col = icon_col if is_sel else THEME.TEXT_MUTED
-            self.typo.draw_label(screen, meta_label, self.typo.label, meta_col, (rect.left + THEME.SP_16, meta_y), anchor="left", tracking=2)
-
-            # High score
-            hi = self._game.high_score if self._game.mode.mode == m.mode else 0
-            if hi > 0:
-                self.typo.draw_text(screen, f"BEST {hi:,}", self.typo.caption, THEME.WARNING, (rect.right - THEME.SP_16, meta_y), anchor="right")
-
-            # Selection indicator
-            if is_sel:
-                sel_x = rect.right - THEME.SP_16
-                sel_y = rect.top + THEME.SP_16
-                pygame.draw.circle(screen, THEME.BORDER_FOCUS, (sel_x, sel_y), 4)
-
-        # ── Footer Instructions ──────────────────────────────────────
-        footer_y = height - THEME.SP_32
-        self.typo.draw_text(
-            screen,
-            "↑↓←→  Navigate     ENTER  Play     ESC  Quit",
-            self.typo.caption,
-            THEME.TEXT_MUTED,
-            (width // 2, footer_y),
-            anchor="center",
-        )
-
-    def _draw_weapon_select(self, screen: pygame.Surface, width: int, height: int) -> None:
-        """Render dedicated weapon selection screen."""
-        screen.fill(THEME.BG_DARK)
-        self._draw_ambient_grid(screen, width, height)
-
-        # ── Title ────────────────────────────────────────────────────
-        mode_str = self._game.mode.badge
-        self.typo.draw_text(screen, "Select Weapon", self.typo.heading, THEME.TEXT_PRIMARY, (width // 2, 48), anchor="center")
-        self.typo.draw_label(screen, mode_str, self.typo.label, THEME.TEXT_MUTED, (width // 2, 80), anchor="center", tracking=3)
-
-        # ── 2×2 Weapon Cards ────────────────────────────────────────
-        cards = self.layout.weapon_card_grid()
-
-        for i, w_spec in enumerate(ALL_WEAPONS):
-            rect = cards[i]
-            is_sel = (i == self._selected_weapon_idx)
-
-            bg = THEME.CARD_BG_SELECTED if is_sel else THEME.CARD_BG
-            border = THEME.BORDER_FOCUS if is_sel else THEME.BORDER_SUBTLE
-            bw = THEME.BORDER_W_FOCUS if is_sel else THEME.BORDER_W_THIN
-
-            draw_card(screen, rect, bg, border, border_width=bw, border_radius=THEME.RADIUS_LG)
-
-            # Number badge
-            num_str = str(i + 1)
-            draw_keycap(screen, num_str, "", self.typo.label, self.typo.caption, rect.left + THEME.SP_24, rect.top + THEME.SP_24, active=is_sel)
-
-            # Weapon name
-            text_x = rect.left + THEME.SP_48 + THEME.SP_8
-            name_col = THEME.TEXT_PRIMARY if is_sel else THEME.TEXT_SECONDARY
-            self.typo.draw_text(screen, w_spec.name, self.typo.heading, name_col, (text_x, rect.top + THEME.SP_16), anchor="topleft")
-
-            # Tagline + difficulty
-            detail = f"{w_spec.tagline}  ·  {w_spec.difficulty_rating}"
-            detail_col = THEME.TEXT_SECONDARY if is_sel else THEME.TEXT_MUTED
-            self.typo.draw_text(screen, detail, self.typo.body_small, detail_col, (text_x, rect.top + THEME.SP_48 - THEME.SP_4), anchor="topleft")
-
-            # Ammo + reload time
-            ammo_desc = "∞" if self._game.mode.infinite_ammo else f"{w_spec.magazine_size} / ∞"
-            reload_str = f"{w_spec.reload_time_seconds:.1f}s"
-            stat_str = f"{ammo_desc}   ·   {reload_str} reload"
-            self.typo.draw_text(screen, stat_str, self.typo.caption, THEME.TEXT_MUTED, (text_x, rect.top + THEME.SP_64 + THEME.SP_4), anchor="topleft")
-
-            # Selection indicator
-            if is_sel:
-                sel_x = rect.right - THEME.SP_16
-                sel_y = rect.top + THEME.SP_16
-                pygame.draw.circle(screen, THEME.BORDER_FOCUS, (sel_x, sel_y), 4)
-
-        # ── Footer ──────────────────────────────────────────────────
-        self.typo.draw_text(
-            screen,
-            "1-4  Select     ENTER  Start     ESC  Back",
-            self.typo.caption,
-            THEME.TEXT_MUTED,
-            (width // 2, height - THEME.SP_32),
-            anchor="center",
-        )
-
-    def _draw_ready(
-        self,
-        screen: pygame.Surface,
-        has_hand: bool,
-    ) -> None:
-        """Hand Acquisition Screen with animated progress."""
-        r = self.layout.ready_card_rect
-        draw_card(screen, r, THEME.BG_SURFACE, THEME.BORDER_SUBTLE, border_width=THEME.BORDER_W_FOCUS, border_radius=THEME.RADIUS_LG)
-
-        if has_hand:
-            title_text = "Hand Detected"
-            title_col = THEME.SUCCESS
-            sub_text = "Hold hand steady to begin..."
-            prog = min(1.0, self._game.ready_hand_timer / settings.READY_HAND_STABLE_SECONDS)
-        else:
-            title_text = "Raise Your Hand"
-            title_col = THEME.ACCENT_CYAN
-            sub_text = "Position your hand in front of the camera"
-            prog = 0.0
-
-        self.typo.draw_text(screen, title_text, self.typo.heading, title_col, (r.centerx, r.top + THEME.SP_32), anchor="center")
-        self.typo.draw_text(screen, sub_text, self.typo.body, THEME.TEXT_SECONDARY, (r.centerx, r.top + THEME.SP_64), anchor="center")
-
-        # Progress bar
-        bar_w = r.width - THEME.SP_64
-        bar_x = r.left + THEME.SP_32
-        bar_y = r.top + THEME.SP_64 + THEME.SP_32
-        draw_progress_bar(screen, bar_x, bar_y, bar_w, 8, prog, THEME.BG_SURFACE_ELEVATED, THEME.SUCCESS, border_radius=4)
-
-    def _draw_countdown(self, screen: pygame.Surface, width: int, height: int) -> None:
-        """Render 3-2-1-GO! countdown overlay."""
-        overlay = pygame.Surface((width, height), pygame.SRCALPHA)
-        overlay.fill(THEME.OVERLAY_DIM)
-        screen.blit(overlay, (0, 0))
-
-        num_str = self._game.countdown_text or "3"
-        col = THEME.SUCCESS if num_str == "GO!" else THEME.ACCENT_CYAN
-        self.typo.draw_text(screen, num_str, self.typo.countdown, col, (width // 2, height // 2 - THEME.SP_24), anchor="center")
-
-        hint = "Pinch to shoot" if self._game.mode.infinite_ammo else "Pinch to shoot  ·  Move hand down to reload"
-        self.typo.draw_text(screen, hint, self.typo.body, THEME.TEXT_SECONDARY, (width // 2, height // 2 + THEME.SP_64 + THEME.SP_16), anchor="center")
-
-    def _draw_paused(self, screen: pygame.Surface) -> None:
-        """Render compact, premium pause overlay."""
-        w, h = screen.get_size()
-        overlay = pygame.Surface((w, h), pygame.SRCALPHA)
-        overlay.fill(THEME.OVERLAY_HEAVY)
-        screen.blit(overlay, (0, 0))
-
-        r = self.layout.pause_card_rect
-        draw_card(screen, r, THEME.BG_SURFACE, THEME.BORDER_FOCUS, border_width=THEME.BORDER_W_FOCUS, border_radius=THEME.RADIUS_LG)
-
-        self.typo.draw_text(screen, "Paused", self.typo.heading, THEME.TEXT_PRIMARY, (r.centerx, r.top + THEME.SP_32), anchor="center")
-
-        # Action items
-        actions = [
-            ("P", "Resume"),
-            ("R", "Restart"),
-            ("M", "Menu"),
-        ]
-        item_y = r.top + THEME.SP_64 + THEME.SP_16
-        for key, label in actions:
-            draw_keycap(screen, key, label, self.typo.label, self.typo.body_small, r.centerx, item_y, active=False)
-            item_y += THEME.SP_48
-
-    def _draw_game_over(self, screen: pygame.Surface, now: float) -> None:
-        """Render clean results screen with key-value stat rows."""
-        w, h = screen.get_size()
-        overlay = pygame.Surface((w, h), pygame.SRCALPHA)
-        overlay.fill(THEME.OVERLAY_HEAVY)
-        screen.blit(overlay, (0, 0))
-
-        r = self.layout.results_card_rect
-        draw_card(screen, r, THEME.BG_SURFACE, THEME.BORDER_FOCUS, border_width=THEME.BORDER_W_FOCUS, border_radius=THEME.RADIUS_LG)
-
-        # Title
-        is_high = self._game.is_new_high_score
-        title = "New High Score!" if is_high else "Run Complete"
-        title_col = THEME.WARNING if is_high else THEME.ACCENT_CYAN
-        self.typo.draw_text(screen, title, self.typo.heading, title_col, (r.centerx, r.top + THEME.SP_24), anchor="center")
-
-        # Big score
-        score_txt = self.typo.format_score(self._game.score.score)
-        self.typo.draw_text(screen, score_txt, self.typo.display, THEME.TEXT_PRIMARY, (r.centerx, r.top + THEME.SP_64 + THEME.SP_8), anchor="center")
-
-        # "FINAL SCORE" label
-        self.typo.draw_label(screen, "FINAL SCORE", self.typo.caption, THEME.TEXT_MUTED, (r.centerx, r.top + THEME.SP_64 + THEME.SP_48 + THEME.SP_4), anchor="center", tracking=3)
-
-        # Mode · Weapon
-        mode_weapon = f"{self._game.mode.name}  ·  {self._game.weapons.spec.name}"
-        self.typo.draw_text(screen, mode_weapon, self.typo.body_small, THEME.TEXT_SECONDARY, (r.centerx, r.top + 148), anchor="center")
-
-        # Separator
-        sep_y = r.top + 170
-        draw_separator(screen, r.left + THEME.SP_32, sep_y, r.right - THEME.SP_32)
-
-        # Stats rows
-        stats = [
-            ("ACCURACY", f"{self._game.stats.accuracy:.0f}%"),
-            ("HITS", str(self._game.stats.targets_hit)),
-            ("SHOTS", str(self._game.stats.shots_fired)),
-            ("TIME", f"{self._game.gameplay_time:.1f}s"),
-        ]
-        row_y = sep_y + THEME.SP_16
-        stat_left = r.left + THEME.SP_48
-        stat_right = r.right - THEME.SP_48
-        for label, value in stats:
-            self.typo.draw_label(screen, label, self.typo.label, THEME.TEXT_MUTED, (stat_left, row_y), anchor="left", tracking=2)
-            self.typo.draw_text(screen, value, self.typo.body_bold, THEME.TEXT_PRIMARY, (stat_right, row_y), anchor="right")
-            row_y += THEME.SP_32
-
-        # Action footer
-        self.typo.draw_text(
-            screen,
-            "ENTER  Play Again     ESC  Menu",
-            self.typo.caption,
-            THEME.TEXT_MUTED,
-            (r.centerx, r.bottom - THEME.SP_24),
-            anchor="center",
-        )
 
     def _draw_crosshair(
         self,

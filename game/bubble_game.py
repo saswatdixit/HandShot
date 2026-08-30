@@ -250,7 +250,29 @@ class BubbleGame:
 
         return ImpactOutcome(hit, points, multiplier)
 
-    def shoot(self, position: tuple[float, float]) -> tuple[Bubble | None, int]:
+    def shoot(
+        self,
+        position_or_impacts: tuple[float, float] | list[tuple[float, float]],
+    ) -> tuple[Bubble | None, int] | list[tuple[Bubble | None, int]]:
+        """Fire a shot. Accepts both single and multi-pellet forms.
+
+        Single-pellet form (tuple):
+            ``game.shoot((x, y))`` -> ``(bubble_or_none, points)``
+
+        Multi-pellet form (list):
+            ``game.shoot([(x1, y1), (x2, y2)])`` -> ``[(bubble, pts), ...]``
+
+        One trigger pull == one ``record_shot()`` regardless of pellet count.
+        Accuracy cannot exceed 100% because ``record_hit`` credits the pull once
+        via ``GameStats._shot_connected``.
+        """
+        # Detect which form was used
+        if isinstance(position_or_impacts, list):
+            return self._shoot_multi(position_or_impacts)
+        else:
+            return self._shoot_single(position_or_impacts)
+
+    def _shoot_single(self, position: tuple[float, float]) -> tuple[Bubble | None, int]:
         """Fire one single-impact shot. Only registers in PLAYING state.
 
         Convenience wrapper for single-pellet fire: counts the trigger pull, then
@@ -269,6 +291,27 @@ class BubbleGame:
             self.combo.register_miss()
 
         return outcome.bubble, outcome.points
+
+    def _shoot_multi(self, impacts: list[tuple[float, float]]) -> list[tuple[Bubble | None, int]]:
+        """Record a shot attempt for multiple pellets. Only registers in PLAYING state."""
+        if self.state is not GameState.PLAYING or not impacts:
+            return [(None, 0)] * len(impacts) if impacts else []
+
+        self.stats.record_shot()
+
+        results: list[tuple[Bubble | None, int]] = []
+        hit_any = False
+
+        for position in impacts:
+            outcome = self.register_impact(position)
+            results.append((outcome.bubble, outcome.points))
+            if outcome.hit:
+                hit_any = True
+
+        if not hit_any and self.mode.allow_combo:
+            self.combo.register_miss()
+
+        return results
 
     def _trigger_game_over(self) -> None:
         """End the run and persist high score."""

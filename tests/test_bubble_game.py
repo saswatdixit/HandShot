@@ -120,7 +120,8 @@ class BubbleGameTests(unittest.TestCase):
 
         # In PAUSED, shooting is blocked
         game.targets.bubbles = [Bubble((400.0, 300.0), (0.0, 0.0), 40.0)]
-        hit, pts = game.shoot((400.0, 300.0))
+        results = game.shoot([(400.0, 300.0)])
+        hit, pts = results[0]
         self.assertIsNone(hit)
         self.assertEqual(pts, 0)
 
@@ -138,7 +139,8 @@ class BubbleGameTests(unittest.TestCase):
         for state in (GameState.READY, GameState.COUNTDOWN, GameState.PAUSED, GameState.GAME_OVER):
             game.state = state
             game.targets.bubbles = [Bubble((400.0, 300.0), (0.0, 0.0), 40.0)]
-            hit, pts = game.shoot((400.0, 300.0))
+            results = game.shoot([(400.0, 300.0)])
+            hit, pts = results[0]
             self.assertIsNone(hit, f"Shot was not blocked in state {state}")
             self.assertEqual(pts, 0)
             self.assertEqual(game.stats.shots_fired, 0)
@@ -193,7 +195,8 @@ class BubbleGameTests(unittest.TestCase):
         game.targets.bubbles = [Bubble((400.0, 300.0), (0.0, 0.0), 40.0)]
 
         # Shooting in Game Over does not hit, fire, or increment shots
-        hit, pts = game.shoot((400.0, 300.0))
+        results = game.shoot([(400.0, 300.0)])
+        hit, pts = results[0]
         self.assertIsNone(hit)
         self.assertEqual(pts, 0)
         self.assertEqual(game.stats.shots_fired, 0)
@@ -246,7 +249,8 @@ class BubbleGameTests(unittest.TestCase):
         expected_points = [10, 10, 20, 20, 30, 30]  # x1, x1, x2, x2, x3, x3
         for i, pts in enumerate(expected_points):
             game.targets.bubbles = [Bubble((400.0, 300.0), (0.0, 0.0), 40.0)]
-            hit, awarded = game.shoot((400.0, 300.0))
+            results = game.shoot([(400.0, 300.0)])
+            hit, awarded = results[0]
             self.assertIsNotNone(hit)
             self.assertEqual(awarded, pts, f"Hit #{i+1} awarded {awarded} instead of {pts}")
 
@@ -261,20 +265,22 @@ class BubbleGameTests(unittest.TestCase):
         # 3 hits -> combo 3 (x2 multiplier)
         for _ in range(3):
             game.targets.bubbles = [Bubble((400.0, 300.0), (0.0, 0.0), 40.0)]
-            game.shoot((400.0, 300.0))
+            game.shoot([(400.0, 300.0)])
         self.assertEqual(game.combo.current_combo, 3)
         self.assertEqual(game.combo.multiplier, 2)
 
         # Miss shot
         game.targets.bubbles = [Bubble((400.0, 300.0), (0.0, 0.0), 40.0)]
-        hit, awarded = game.shoot((100.0, 100.0))
+        results = game.shoot([(100.0, 100.0)])
+        hit, awarded = results[0]
         self.assertIsNone(hit)
         self.assertEqual(awarded, 0)
         self.assertEqual(game.combo.current_combo, 0)
         self.assertEqual(game.combo.multiplier, 1)
 
         # Next hit is at base 1x (+10)
-        hit2, awarded2 = game.shoot((400.0, 300.0))
+        results2 = game.shoot([(400.0, 300.0)])
+        hit2, awarded2 = results2[0]
         self.assertIsNotNone(hit2)
         self.assertEqual(awarded2, 10)
 
@@ -285,7 +291,7 @@ class BubbleGameTests(unittest.TestCase):
         # 4 hits -> combo 4
         for _ in range(4):
             game.targets.bubbles = [Bubble((400.0, 300.0), (0.0, 0.0), 40.0)]
-            game.shoot((400.0, 300.0))
+            game.shoot([(400.0, 300.0)])
         self.assertEqual(game.combo.current_combo, 4)
 
         # Bubble escapes
@@ -342,7 +348,8 @@ class BubbleGameTests(unittest.TestCase):
         game = BubbleGame(random.Random(1))
         game.reset(BOUNDS, start_state=GameState.PLAYING)
         game.targets.bubbles = [Bubble((400.0, 300.0), (0.0, 0.0), 40.0)]
-        hit, _ = game.shoot((448.0, 300.0))
+        results = game.shoot([(448.0, 300.0)])
+        hit, _ = results[0]
         self.assertIsNotNone(hit)
         self.assertEqual(game.score.score, 10)
 
@@ -437,3 +444,23 @@ class BubbleGameTests(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
 
+
+    def test_multi_pellet_accuracy_capped_at_100(self) -> None:
+        game = BubbleGame(random.Random(1))
+        game.reset(BOUNDS, start_state=GameState.PLAYING)
+
+        # Spawn two targets side by side
+        game.targets.bubbles = [
+            Bubble((400.0, 300.0), (0.0, 0.0), 40.0),
+            Bubble((480.0, 300.0), (0.0, 0.0), 40.0)
+        ]
+
+        # Simulate shotgun blast hitting both targets
+        results = game.shoot([(400.0, 300.0), (480.0, 300.0), (100.0, 100.0), (100.0, 100.0)])
+
+        self.assertEqual(game.stats.shots_fired, 1)
+        self.assertEqual(game.stats.targets_hit, 1) # Only 1 hit per trigger pull for accuracy
+        self.assertAlmostEqual(game.stats.accuracy, 100.0)
+
+        hit_targets = sum(1 for hit, _ in results if hit is not None)
+        self.assertEqual(hit_targets, 2)
