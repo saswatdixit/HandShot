@@ -4,7 +4,7 @@
 
 **HANDSHOT** is a computer-vision-powered aim training game that lets you aim and shoot using your **hand in front of a webcam**.
 
-Instead of a mouse, HANDSHOT uses real-time hand landmark tracking to control an on-screen crosshair. Players can aim with their index finger, shoot using a pinch gesture, and interact with the game using additional hand gestures...
+Instead of a mouse, HANDSHOT uses real-time hand landmark tracking to control an on-screen crosshair. Players can aim with their index finger, shoot using a pinch gesture, and interact with the game using additional hand gestures.
 
 > **Point. Pinch. Shoot. Improve.**
 
