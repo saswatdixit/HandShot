@@ -21,4 +21,5 @@ var/
 *.egg
 .venv
 venv/
+venv/
 ENV/
